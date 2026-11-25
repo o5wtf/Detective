@@ -4,6 +4,7 @@ signal new_case_pressed
 signal settings_pressed
 signal continue_pressed
 signal restart_pressed
+signal editor_pressed
 
 var _continue: Button
 var _restart: Button
@@ -42,6 +43,9 @@ func _ready() -> void:
 	_problem = UiWidgets.label("", "SaveProblemLabel")
 	_problem.visible = false
 	box.add_child(_problem)
+	var editor := UiWidgets.button(UiStrings.EDITOR, "EditorButton")
+	editor.pressed.connect(func() -> void: editor_pressed.emit())
+	box.add_child(editor)
 	var settings := UiWidgets.button(UiStrings.SETTINGS, "SettingsButton")
 	settings.pressed.connect(func() -> void: settings_pressed.emit())
 	box.add_child(settings)
@@ -59,6 +63,9 @@ func refresh_for(case_path: String) -> void:
 		_restart.visible = present
 	if _problem != null and not present:
 		_problem.visible = false
+	var editor := find_child("EditorButton", true, false) as Button
+	if editor != null:
+		editor.visible = SettingsStore.load_current().developer
 
 
 func show_save_problem(reason: String) -> void:

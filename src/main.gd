@@ -1,7 +1,5 @@
 extends Control
 
-const BUILTIN_CASE := "res://cases/rain_over_shadow.json"
-
 var _screen: Control = null
 var _place := "menu"
 var _exit: Control
@@ -33,7 +31,9 @@ func handle_back() -> void:
 	match _place:
 		"accusation":
 			show_investigation()
-		"settings", "briefing", "damaged", "investigation":
+		"editor":
+			show_editor_home()
+		"picker", "editor_home", "settings", "briefing", "damaged", "investigation":
 			show_menu()
 		_:
 			if _exit != null:
@@ -56,11 +56,13 @@ func show_menu() -> void:
 	_place = "menu"
 	var screen := preload("res://ui/screens/main_menu.tscn").instantiate()
 	_swap(screen)
-	screen.new_case_pressed.connect(_on_new_case)
+	screen.new_case_pressed.connect(show_picker)
+	screen.editor_pressed.connect(show_editor_home)
 	screen.settings_pressed.connect(func() -> void: show_settings(false))
 	screen.continue_pressed.connect(_on_continue)
 	screen.restart_pressed.connect(_on_restart)
-	screen.refresh_for(BUILTIN_CASE)
+	CaseLibrary.ensure_example()
+	screen.refresh_for(CaseLibrary.published_path(CaseLibrary.example_id()))
 
 
 func show_settings(explain_key: bool) -> void:
@@ -95,8 +97,62 @@ func show_accusation() -> void:
 	_swap(screen)
 
 
+func show_picker() -> void:
+	_place = "picker"
+	CaseLibrary.ensure_example()
+	var screen := CasePicker.new()
+	screen.menu_pressed.connect(show_menu)
+	screen.play_pressed.connect(_on_play)
+	screen.damaged_pressed.connect(func(case_id: String) -> void:
+		var loaded := CaseLoader.load_case(CaseLibrary.published_path(case_id))
+		show_damaged(loaded.errors)
+	)
+	_swap(screen)
+
+
+func show_editor_home() -> void:
+	_place = "editor_home"
+	CaseLibrary.ensure_example()
+	var screen := EditorHome.new()
+	screen.menu_pressed.connect(show_menu)
+	screen.open_pressed.connect(show_editor)
+	_swap(screen)
+
+
+func show_editor(case_id: String) -> void:
+	_place = "editor"
+	var screen := CaseEditor.new()
+	screen.leave_pressed.connect(show_editor_home)
+	screen.copied.connect(show_editor)
+	_swap(screen)
+	screen.open_id(case_id)
+
+
+func _on_play(case_id: String, mode: String) -> void:
+	var path := CaseLibrary.published_path(case_id)
+	Speaker.reset_for_case()
+	if mode == "restart":
+		SaveState.discard(case_id)
+	if mode == "continue":
+		var result := Game.continue_case(path)
+		if result.get("ok", false):
+			show_investigation()
+			return
+		if _screen != null and _screen.has_method("show_save_problem"):
+			_screen.show_save_problem(str(result.get("reason", "")))
+		return
+	if not SettingsStore.has_playable_key():
+		show_settings(true)
+		return
+	var loaded := Game.open_case(path)
+	if not loaded.ok:
+		show_damaged(loaded.errors)
+		return
+	show_briefing()
+
+
 func _on_continue() -> void:
-	var result := Game.continue_case(BUILTIN_CASE)
+	var result := Game.continue_case(CaseLibrary.published_path(CaseLibrary.example_id()))
 	if result.get("ok", false):
 		show_investigation()
 		return
@@ -105,7 +161,7 @@ func _on_continue() -> void:
 
 
 func _on_restart() -> void:
-	SaveState.discard(SaveState.case_id_from_path(BUILTIN_CASE))
+	SaveState.discard(CaseLibrary.example_id())
 	_on_new_case()
 
 
@@ -122,7 +178,8 @@ func _on_new_case() -> void:
 	if not SettingsStore.has_playable_key():
 		show_settings(true)
 		return
-	var loaded := Game.open_case(BUILTIN_CASE)
+	CaseLibrary.ensure_example()
+	var loaded := Game.open_case(CaseLibrary.published_path(CaseLibrary.example_id()))
 	if not loaded.ok:
 		show_damaged(loaded.errors)
 		return
