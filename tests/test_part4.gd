@@ -253,8 +253,13 @@ func test_every_section_seven_rule_jumps_to_a_visible_field() -> void:
 			continue
 		assert_true(node.is_visible_in_tree(), text)
 		assert_true(node.size.y > 0.0, text)
+		if str(issue.get("level", "")) == "warning":
+			var warnings := editor.find_child("WarningsBody", true, false) as Control
+			if warnings != null:
+				warnings.visible = true
+				await _frame()
 		var jump := editor.find_child("GotoIssue", true, false) as Button
-		assert_true(jump != null and jump.is_visible_in_tree())
+		assert_true(jump != null and jump.is_visible_in_tree(), text)
 		editor.free()
 
 

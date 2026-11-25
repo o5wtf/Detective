@@ -20,6 +20,8 @@ var _tab := 0
 var _hold_tab := false
 var _remove_kind := ""
 var _remove_id := ""
+var _sandbox: Sandbox
+var _sandbox_agent := ""
 
 
 func open_id(next_id: String) -> void:
@@ -38,6 +40,14 @@ func consume_back() -> bool:
 		_warn.visible = false
 		return true
 	if _failed != null and _failed.visible:
+		return true
+	var spend := find_child("SpendWarn", true, false)
+	if spend != null and spend.visible:
+		spend.visible = false
+		return true
+	var sandbox := find_child("SandboxPanel", true, false)
+	if sandbox != null and sandbox.visible:
+		sandbox.visible = false
 		return true
 	if _read_only:
 		return false
@@ -78,7 +88,7 @@ func ask_remove(kind: String, item_id: String) -> void:
 		if lines.is_empty():
 			label.text = "Удалить?"
 		else:
-			label.text = "Используется в %d местах:\n%s" % [lines.size(), "\n".join(lines)]
+			label.text = "%s:\n%s" % [_places_phrase(lines.size()), "\n".join(lines)]
 	var dialog := find_child("DeleteConfirm", true, false)
 	if dialog != null:
 		dialog.visible = true
@@ -96,6 +106,13 @@ func goto_issue(issue: Dictionary) -> void:
 	var node := find_child(str(target.get("node", "")), true, false) as Control
 	if node != null:
 		_keep_visible(node)
+
+
+func _places_phrase(count: int) -> String:
+	var word := "местах"
+	if count % 10 == 1 and count % 100 != 11:
+		word = "месте"
+	return "Используется в %d %s" % [count, word]
 
 
 func _section_label(text: String) -> Control:
@@ -135,6 +152,10 @@ func _build() -> void:
 		var publish := UiWidgets.button(UiStrings.PUBLISH, "PublishButton")
 		publish.pressed.connect(func() -> void: _publish(false))
 		bar.add_child(publish)
+	if not _read_only:
+		var ask := UiWidgets.button("Спросить персонажа", "AskCharacter")
+		ask.pressed.connect(_ask_spend)
+		bar.add_child(ask)
 	var copy := UiWidgets.button(UiStrings.COPY_CASE, "CopyButton")
 	copy.pressed.connect(_copy)
 	bar.add_child(copy)
@@ -156,10 +177,14 @@ func _build() -> void:
 	_failed = _fail_popup()
 	_warn = _warn_popup()
 	var remove_dialog := _delete_popup()
+	var spend := _spend_popup()
+	var sandbox := _sandbox_panel()
 	add_child(_help)
 	add_child(_failed)
 	add_child(_warn)
 	add_child(remove_dialog)
+	add_child(spend)
+	add_child(sandbox)
 	_lock_if_needed()
 	var errors := VBoxContainer.new()
 	errors.name = "EditorIssues"
@@ -846,16 +871,175 @@ func _show_errors() -> void:
 		return
 	for child in box.get_children():
 		child.free()
+	var errors: Array = []
+	var warnings: Array = []
 	for issue in EditorChecks.collect(_doc.raw):
-		var row := HBoxContainer.new()
-		var label := UiWidgets.label(str(issue.get("text", "")))
-		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(label)
-		var jump := UiWidgets.button("Перейти", "GotoIssue")
-		var payload: Dictionary = issue
-		jump.pressed.connect(func() -> void: goto_issue(payload))
-		row.add_child(jump)
-		box.add_child(row)
+		if str(issue.get("level", "")) == "warning":
+			warnings.append(issue)
+		else:
+			errors.append(issue)
+	for issue in errors:
+		box.add_child(_issue_row(issue))
+	if warnings.is_empty():
+		return
+	var toggle := UiWidgets.button("Предупреждения (%d)" % warnings.size(), "ToggleWarnings")
+	var body := VBoxContainer.new()
+	body.name = "WarningsBody"
+	body.visible = false
+	for issue in warnings:
+		body.add_child(_issue_row(issue))
+	toggle.pressed.connect(func() -> void: body.visible = not body.visible)
+	box.add_child(toggle)
+	box.add_child(body)
+
+
+func _issue_row(issue: Dictionary) -> Control:
+	var row := HBoxContainer.new()
+	var label := UiWidgets.label(str(issue.get("text", "")))
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(label)
+	var jump := UiWidgets.button("Перейти", "GotoIssue")
+	var payload: Dictionary = issue
+	jump.pressed.connect(func() -> void: goto_issue(payload))
+	row.add_child(jump)
+	return row
+
+
+func _card_dialog(node_name: String) -> Control:
+	var root := Control.new()
+	root.name = node_name
+	root.visible = false
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	var dim := ColorRect.new()
+	dim.name = "Dim"
+	dim.color = Color(0, 0, 0, 0.72)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	UiWidgets.fill(dim)
+	root.add_child(dim)
+	var center := CenterContainer.new()
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiWidgets.fill(center)
+	root.add_child(center)
+	var card := PanelContainer.new()
+	card.name = "%sCard" % node_name
+	var style := StyleBoxFlat.new()
+	style.bg_color = NoirTheme.PANEL
+	style.border_color = NoirTheme.LINE
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(6)
+	style.content_margin_left = 16
+	style.content_margin_top = 16
+	style.content_margin_right = 16
+	style.content_margin_bottom = 16
+	card.add_theme_stylebox_override("panel", style)
+	center.add_child(card)
+	var box := VBoxContainer.new()
+	box.name = "%sBox" % node_name
+	card.add_child(box)
+	return root
+
+
+func _spend_popup() -> Control:
+	var panel := _card_dialog("SpendWarn")
+	var box := panel.find_child("SpendWarnBox", true, false) as VBoxContainer
+	var label := UiWidgets.label("Запрос к модели расходует лимит API. Ответ только текстом и не попадает в сохранение партии.", "SpendText")
+	label.custom_minimum_size = Vector2(420, 0)
+	box.add_child(label)
+	box.custom_minimum_size = Vector2(420, 0)
+	var row := HBoxContainer.new()
+	box.add_child(row)
+	var yes := UiWidgets.button("Спросить", "ConfirmAsk")
+	yes.pressed.connect(_open_sandbox)
+	row.add_child(yes)
+	var no := UiWidgets.button(UiStrings.CANCEL, "CancelAsk")
+	no.pressed.connect(func() -> void: panel.visible = false)
+	row.add_child(no)
+	return panel
+
+
+func _sandbox_panel() -> Control:
+	var panel := _card_dialog("SandboxPanel")
+	var box := panel.find_child("SandboxPanelBox", true, false) as VBoxContainer
+	box.custom_minimum_size = Vector2(420, 0)
+	box.add_child(UiWidgets.label("Как в начале дела. Ответы только текстом.", "SandboxNote"))
+	var question := LineEdit.new()
+	question.name = "SandboxQuestion"
+	question.placeholder_text = "Где вы были вчера вечером?"
+	question.custom_minimum_size = Vector2(420, 48)
+	box.add_child(question)
+	var send := UiWidgets.button("Спросить", "SandboxSend")
+	send.pressed.connect(_send_sandbox)
+	box.add_child(send)
+	var answer := UiWidgets.label("", "SandboxAnswer")
+	answer.custom_minimum_size = Vector2(420, 0)
+	box.add_child(answer)
+	var close := UiWidgets.button("Закрыть", "CloseSandbox")
+	close.pressed.connect(func() -> void: panel.visible = false)
+	box.add_child(close)
+	return panel
+
+
+func _ask_spend() -> void:
+	if _read_only or _doc == null:
+		return
+	var label := find_child("SpendText", true, false) as Label
+	var confirm := find_child("ConfirmAsk", true, false) as Button
+	var text := "Запрос к модели расходует лимит API. Ответ только текстом и не попадает в сохранение партии."
+	if not SettingsStore.has_playable_key():
+		text += "\nНет ключа API в настройках."
+		if confirm != null:
+			confirm.disabled = true
+	elif confirm != null:
+		confirm.disabled = false
+	if label != null:
+		label.text = text
+	var panel := find_child("SpendWarn", true, false)
+	if panel != null:
+		panel.visible = true
+
+
+func _open_sandbox() -> void:
+	var warn := find_child("SpendWarn", true, false)
+	if warn != null:
+		warn.visible = false
+	if not SettingsStore.has_playable_key() or _doc == null:
+		return
+	if _sandbox == null:
+		_sandbox = Sandbox.new()
+		_sandbox.name = "SandboxSession"
+		_sandbox.agent_replied.connect(_on_sandbox_reply)
+		add_child(_sandbox)
+	var agents: Array = _doc.raw.get("agents", [])
+	if _agent < 0 or _agent >= agents.size() or agents[_agent] is not Dictionary:
+		return
+	_sandbox_agent = str((agents[_agent] as Dictionary).get("id", ""))
+	_sandbox.open_draft(_doc.export_raw())
+	var answer := find_child("SandboxAnswer", true, false) as Label
+	if answer != null:
+		answer.text = ""
+	var panel := find_child("SandboxPanel", true, false)
+	if panel != null:
+		panel.visible = true
+
+
+func _send_sandbox() -> void:
+	if _sandbox == null or _sandbox.is_busy:
+		return
+	var question := find_child("SandboxQuestion", true, false) as LineEdit
+	var text := ""
+	if question != null:
+		text = question.text.strip_edges()
+	if text == "":
+		return
+	await _sandbox.ask(_sandbox_agent, text)
+
+
+func _on_sandbox_reply(agent_id: String, text: String, _remark: String) -> void:
+	var answer := find_child("SandboxAnswer", true, false) as Label
+	if answer != null:
+		answer.text = text
+	var _ignored := agent_id
 
 
 func _lock_if_needed() -> void:
@@ -873,7 +1057,7 @@ func _lock_if_needed() -> void:
 		var node_name := str(button.name)
 		if node_name.ends_with("Help") or node_name == "BackButton" or node_name == "CopyButton" or node_name == "CloseHelp" or node_name == "GotoIssue":
 			continue
-		if node_name == "CancelPublish" or node_name == "CancelDelete" or node_name == "ConfirmNo":
+		if node_name == "CancelPublish" or node_name == "CancelDelete" or node_name == "ConfirmNo" or node_name == "CancelAsk" or node_name == "CloseSandbox" or node_name == "ToggleWarnings":
 			continue
 		(button as Button).disabled = true
 
