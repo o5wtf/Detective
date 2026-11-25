@@ -6,7 +6,10 @@ const BASE_URL := "https://generativelanguage.googleapis.com/v1beta/models"
 const SERVER_PAUSE_S := 2.0
 const SERVER_ATTEMPTS := 2
 const TRANSIENT_RETRIES := 2
-const TURN_DEADLINE_S := 25.0
+const NET_RETRIES := 2
+const ATTEMPT_TIMEOUT_S := 10.0
+const TURN_DEADLINE_S := 30.0
+const MIN_ATTEMPT_S := 3.0
 
 var api_key: String = ""
 var dialogue_model: String = LLMConfig.DEFAULT_DIALOGUE_MODEL
@@ -78,9 +81,12 @@ func _generate_body(request: Dictionary) -> Dictionary:
 	var raise_tokens := false
 	var token_retried := false
 	var transient_retries := 0
+	var net_retries := 0
 	var server_retries := 0
 	var last := _failure("bad_response", "Запрос к Gemini не завершился.")
 	while true:
+		if not probe and _remaining_s(deadline, false) < MIN_ATTEMPT_S:
+			return _with_meta(_failure("timeout", UiStrings.NO_LINK), model, started)
 		if _past_deadline(deadline, probe):
 			return _with_meta(_failure("timeout", "Модель «%s» не ответила за %d с." % [model, int(turn_deadline_ms / 1000.0)]), model, started)
 		var call_started := Time.get_ticks_msec()
@@ -88,18 +94,17 @@ func _generate_body(request: Dictionary) -> Dictionary:
 		var response_ms := Time.get_ticks_msec() - call_started
 		var total_ms := Time.get_ticks_msec() - started
 		var transport_error := str(outcome.get("error", ""))
-		if transport_error == "offline":
-			_emit_request(model, thinking_sent, 0, response_ms, total_ms, "", "offline")
-			return _with_meta(_failure("offline", "Нет сети. Проверьте подключение и повторите."), model, call_started)
-		if transport_error == "timeout":
-			_emit_request(model, thinking_sent, 0, response_ms, total_ms, "", "timeout")
-			last = _failure("timeout", "Модель «%s» не ответила за %d с." % [model, int(_timeout_for(request))])
-			var timeout_delay := _transient_delay(transient_retries, outcome, deadline, probe)
-			if timeout_delay >= 0.0:
-				transient_retries += 1
-				await _wait(timeout_delay)
-				continue
-			return _with_meta(last, model, started)
+		if transport_error == "offline" or transport_error == "timeout":
+			_emit_request(model, thinking_sent, 0, response_ms, total_ms, "", transport_error)
+			last = _failure(transport_error, UiStrings.NO_LINK)
+			if probe or net_retries >= NET_RETRIES:
+				return _with_meta(last, model, started)
+			var pause := 1.0 if net_retries == 0 else 3.0
+			if _remaining_s(deadline, false) < pause + MIN_ATTEMPT_S:
+				return _with_meta(last, model, started)
+			net_retries += 1
+			await _wait(pause)
+			continue
 		var status := int(outcome.get("status", 0))
 		var body := _redact(str(outcome.get("body", "")))
 		var google := _google_status(body)
@@ -144,7 +149,10 @@ func _generate_body(request: Dictionary) -> Dictionary:
 			return _with_meta(_failure("server", _with_reason("Сервис Gemini временно недоступен.", reason)), model, call_started)
 		if status == 400 and _mentions_thinking(reason) and thinking_sent != "off":
 			_emit_request(model, thinking_sent, status, response_ms, total_ms, body, "thinking")
-			thinking_sent = _downgrade_thinking(model, thinking_sent)
+			var role := str(request.get("model_role", "dialogue"))
+			if role == "dialogue" and thinking_sent.to_upper() == "LOW":
+				return _with_meta(_failure("rejected", _with_reason("Запрос отклонён.", reason)), model, call_started)
+			thinking_sent = _downgrade_thinking(model, role, thinking_sent)
 			continue
 		if status == 400:
 			_emit_request(model, thinking_sent, status, response_ms, total_ms, body, "rejected")
@@ -176,19 +184,32 @@ func _remaining_s(deadline: int, probe: bool) -> float:
 func _thinking_for(model: String, request: Dictionary) -> String:
 	if bool(request.get("probe", false)):
 		return "off"
-	if accepted_thinking.has(model):
-		return str(accepted_thinking[model])
+	var role := str(request.get("model_role", "dialogue"))
+	var key := _thinking_key(model, role)
+	if accepted_thinking.has(key):
+		var saved := str(accepted_thinking[key])
+		if role == "dialogue" and (saved == "off" or saved == ""):
+			return "MINIMAL"
+		return saved
+	if role == "dialogue":
+		return "MINIMAL"
 	var level := thinking_level.strip_edges().to_upper()
 	if level == "":
 		return LLMConfig.DEFAULT_THINKING
 	return level
 
 
-func _downgrade_thinking(model: String, sent: String) -> String:
-	var next := "LOW" if sent.to_upper() == "MINIMAL" else "off"
-	accepted_thinking[model] = next
-	SettingsStore.remember_thinking(model, next)
+func _downgrade_thinking(model: String, role: String, sent: String) -> String:
+	var next := "LOW"
+	if role != "dialogue" and sent.to_upper() != "MINIMAL":
+		next = "off"
+	accepted_thinking[_thinking_key(model, role)] = next
+	SettingsStore.remember_thinking(model, next, role)
 	return next
+
+
+func _thinking_key(model: String, role: String) -> String:
+	return "%s|%s" % [model, role]
 
 
 func _mentions_thinking(reason: String) -> bool:
@@ -202,7 +223,8 @@ func _post(model: String, request: Dictionary, schema_field: String, thinking_se
 		"x-goog-api-key": api_key,
 	}
 	var payload := JSON.stringify(_body(request, schema_field, thinking_sent, raise_tokens))
-	var pending: Variant = _transport.call("request", url, headers, payload, _timeout_for(request))
+	var mark := "dialogue_first_byte" if str(request.get("model_role", "")) == "dialogue" else ""
+	var pending: Variant = _transport.call("request", url, headers, payload, _timeout_for(request), mark)
 	if pending is Dictionary:
 		return pending
 	return await pending
@@ -216,10 +238,8 @@ func _timeout_for(request: Dictionary) -> float:
 		limit = ping_timeout_s
 	if bool(request.get("probe", false)):
 		return limit
-	var remaining := float(turn_deadline_ms) / 1000.0
-	if _turn_deadline > 0:
-		remaining = _remaining_s(_turn_deadline, false)
-	return minf(limit, maxf(remaining, 0.2))
+	var remaining := _remaining_s(_turn_deadline, false)
+	return minf(ATTEMPT_TIMEOUT_S, minf(limit, maxf(remaining, 0.0)))
 
 
 func _body(request: Dictionary, schema_field: String, thinking_sent: String, raise_tokens: bool) -> Dictionary:
@@ -513,8 +533,8 @@ func _safety_settings() -> Array:
 class Transport:
 	extends Node
 
-	func request(url: String, headers: Dictionary, body: String, timeout_s: float) -> Dictionary:
+	func request(url: String, headers: Dictionary, body: String, timeout_s: float, byte_mark: String = "") -> Dictionary:
 		var lines: PackedStringArray = PackedStringArray()
 		for key in headers:
 			lines.append("%s: %s" % [str(key), str(headers[key])])
-		return await HttpSession.exchange(self, url, lines, body, timeout_s)
+		return await HttpSession.exchange(self, url, lines, body, timeout_s, byte_mark)

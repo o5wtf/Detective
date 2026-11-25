@@ -31,6 +31,9 @@ static func slot_path(case_id: String) -> String:
 	return "%s/%s.json" % [DIR, _safe(case_id)]
 
 
+static var fail_before_rename: bool = false
+
+
 static func write_state(state: GameState) -> bool:
 	if state == null or state.case_id.strip_edges() == "":
 		return false
@@ -41,12 +44,30 @@ static func write_state(state: GameState) -> bool:
 		"case_version_hash": state.case_version_hash,
 		"state": _without_secrets(state.to_dict()),
 	}
-	var file := FileAccess.open(slot_path(state.case_id), FileAccess.WRITE)
+	var dest := slot_path(state.case_id)
+	var temp := dest + ".tmp"
+	var file := FileAccess.open(temp, FileAccess.WRITE)
 	if file == null:
 		return false
 	file.store_string(JSON.stringify(envelope, "\t"))
 	file.close()
-	return true
+	if fail_before_rename:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(temp))
+		return false
+	var dest_abs := ProjectSettings.globalize_path(dest)
+	var temp_abs := ProjectSettings.globalize_path(temp)
+	if FileAccess.file_exists(dest):
+		var bak := dest_abs + ".bak"
+		if DirAccess.rename_absolute(dest_abs, bak) != OK:
+			DirAccess.remove_absolute(temp_abs)
+			return false
+		if DirAccess.rename_absolute(temp_abs, dest_abs) != OK:
+			DirAccess.rename_absolute(bak, dest_abs)
+			DirAccess.remove_absolute(temp_abs)
+			return false
+		DirAccess.remove_absolute(bak)
+		return true
+	return DirAccess.rename_absolute(temp_abs, dest_abs) == OK
 
 
 static func read(case_id: String) -> Dictionary:

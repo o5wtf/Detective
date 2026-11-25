@@ -5,6 +5,7 @@ signal agent_replied(agent_id: String, text: String, remark: String)
 signal case_opened
 signal events(list: Array)
 signal llm_error(kind: String, message: String)
+signal save_failed(message: String)
 signal busy_changed(is_busy: bool)
 
 var case_data: CaseData = null
@@ -22,9 +23,12 @@ var speech_style: String = ""
 var speech_line: String = ""
 var is_busy: bool = false
 var _turn_token: int = 0
+## Снимок партии до present_evidence / note_question. Пока ход не закончен, сворачивание пишет его.
+var _turn_snapshot: Dictionary = {}
 
 
 func open_case(path: String) -> CaseLoader.Result:
+	_drop_turn()
 	var loaded := CaseLoader.load_case(path)
 	if not loaded.ok:
 		case_data = null
@@ -122,40 +126,59 @@ func _turn(agent_id: String, player_text: String, event_note: String, evidence_i
 	var turn_model := ""
 	_sync_dialogues()
 	var snapshot := state.to_dict()
+	_turn_snapshot = snapshot
 	var turn_events: Array = []
 	if evidence_id != "":
 		turn_events.append_array(_engine.present_evidence(agent_id, evidence_id))
 	turn_events.append_array(_engine.note_question(agent_id))
 	var dialogue: DialogueState = _dialogues[agent_id]
-	if not turn_config.summary_after_reply and dialogue.needs_summary():
-		LlmTiming.note_request(tally, "summary", "summary")
-		dialogue = await _refresh_summary(agent_id, dialogue)
 	var packet: Array = _engine.get_packet(agent_id)
 	var request := PromptBuilder.build_turn(case_data, state, agent_id, packet, dialogue, player_text, event_note)
+	var chain := 1
 	LlmTiming.note_request(tally, "reply", "reply")
 	TurnTiming.mark("dialogue_sent")
 	var result := await _generate(request)
 	TurnTiming.mark("dialogue_done")
+	if not _turn_current(token):
+		return
 	turn_model = str(result.get("model", turn_model))
 	if _is_network_error(result):
 		_abort_turn(snapshot, turn_started, turn_model, tally, str(result.get("error", "")), str(result.get("message", "")))
 		return
-	if str(result.get("error", "")) == "blocked":
-		LlmTiming.note_request(tally, "regen", "blocked")
-		result = await _generate(_with_suffix(request, "Отвечай сдержаннее, без откровенных подробностей."))
+	if _reply_missing(result):
+		if chain >= 2:
+			_abort_turn(snapshot, turn_started, turn_model, tally, "empty", UiStrings.REPHRASE)
+			return
+		chain += 1
+		var filler := "Отвечай сдержаннее, без откровенных подробностей." if str(result.get("error", "")) == "blocked" else "Ответь одной целой репликой."
+		LlmTiming.note_request(tally, "regen", "blocked" if str(result.get("error", "")) == "blocked" else "empty")
+		result = await _generate(_with_suffix(request, filler))
+		if not _turn_current(token):
+			return
 		turn_model = str(result.get("model", turn_model))
 		if _is_network_error(result):
 			_abort_turn(snapshot, turn_started, turn_model, tally, str(result.get("error", "")), str(result.get("message", "")))
 			return
+		if _reply_missing(result):
+			_abort_turn(snapshot, turn_started, turn_model, tally, "empty", UiStrings.REPHRASE)
+			return
 	var agent: CaseData.Agent = case_data.agent_by_id[agent_id]
 	var report := _validate_result(result, packet, agent_id, dialogue, player_text, turn_config.local_fixes)
 	if _should_regenerate(report, turn_config.local_fixes):
+		if chain >= 2:
+			_abort_turn(snapshot, turn_started, turn_model, tally, "bad_response", UiStrings.REPHRASE if _reply_missing(result) else "Целый ответ не принят.")
+			return
+		chain += 1
 		LlmTiming.note_request(tally, "regen", "validation")
-		var retry := _with_suffix(request, ResponseValidator.repair_note(report["violations"]))
-		result = await _generate(retry)
+		result = await _generate(_with_suffix(request, ResponseValidator.repair_note(report["violations"])))
+		if not _turn_current(token):
+			return
 		turn_model = str(result.get("model", turn_model))
 		if _is_network_error(result):
 			_abort_turn(snapshot, turn_started, turn_model, tally, str(result.get("error", "")), str(result.get("message", "")))
+			return
+		if _reply_missing(result):
+			_abort_turn(snapshot, turn_started, turn_model, tally, "empty", UiStrings.REPHRASE)
 			return
 		report = _validate_result(result, packet, agent_id, dialogue, player_text, turn_config.local_fixes)
 	var reply := ""
@@ -178,12 +201,14 @@ func _turn(agent_id: String, player_text: String, event_note: String, evidence_i
 		var restarted := PromptBuilder.build_turn(case_data, state, agent_id, packet, dialogue, player_text, event_note)
 		LlmTiming.note_request(tally, "regen", "admit")
 		result = await _generate(_with_suffix(restarted, _admit_note(plan)))
+		if not _turn_current(token):
+			return
 		turn_model = str(result.get("model", turn_model))
 		if _is_network_error(result):
 			_abort_turn(snapshot, turn_started, turn_model, tally, str(result.get("error", "")), str(result.get("message", "")))
 			return
-		if not _read_choice(result).reply_complete():
-			_abort_turn(snapshot, turn_started, turn_model, tally, "bad_response", "Повторная реплика оборвалась.")
+		if _reply_missing(result):
+			_abort_turn(snapshot, turn_started, turn_model, tally, "empty", UiStrings.REPHRASE)
 			return
 		report = _validate_result(result, packet, agent_id, dialogue, player_text, turn_config.local_fixes)
 	else:
@@ -213,18 +238,21 @@ func _turn(agent_id: String, player_text: String, event_note: String, evidence_i
 	if turn_model == "":
 		turn_model = str(result.get("model", ""))
 	var text_ms := Time.get_ticks_msec() - turn_started
+	_sync_dialogues()
+	if not _autosave():
+		save_failed.emit("Не удалось записать сохранение.")
+	_turn_snapshot = {}
 	agent_replied.emit(agent_id, reply, remark)
 	events.emit(turn_events)
 	_end_busy()
-	if turn_config.summary_after_reply and dialogue.needs_summary():
+	if dialogue.needs_summary():
 		LlmTiming.note_request(tally, "summary", "summary")
-		dialogue = await _refresh_summary(agent_id, dialogue)
-		if token != _turn_token:
+		dialogue = await _refresh_summary(agent_id, dialogue, token)
+		if not _turn_current(token):
 			return
-	if token != _turn_token:
-		return
-	_sync_dialogues()
-	_autosave()
+		_sync_dialogues()
+		if not _autosave():
+			save_failed.emit("Не удалось записать сохранение.")
 	_publish_turn_timing(text_ms, turn_model, tally)
 
 
@@ -271,13 +299,14 @@ func _log_choice(agent_id: String, options: Array, plan: Dictionary) -> void:
 	])
 
 
-func _autosave() -> void:
+func _autosave() -> bool:
 	if state == null:
-		return
-	SaveState.write_state(state)
+		return false
+	return SaveState.write_state(state)
 
 
 func _replace_state(data: Variant) -> void:
+	_drop_turn()
 	if data is not Dictionary:
 		return
 	state = GameState.from_dict(data)
@@ -295,7 +324,7 @@ func _replace_state(data: Variant) -> void:
 	notebook = Notebook.new(case_data, state)
 
 
-func _refresh_summary(agent_id: String, dialogue: DialogueState) -> DialogueState:
+func _refresh_summary(agent_id: String, dialogue: DialogueState, token: int) -> DialogueState:
 	var live := _rebind_dialogue(agent_id, dialogue)
 	if not live.needs_summary():
 		return live
@@ -304,6 +333,8 @@ func _refresh_summary(agent_id: String, dialogue: DialogueState) -> DialogueStat
 	var folded: Array = live.messages.slice(live.summarized_count, fold_until)
 	var request := Summarizer.build_request(agent.name, live.summary, folded)
 	var result := await _generate(request)
+	if not _turn_current(token):
+		return live
 	live = _rebind_dialogue(agent_id, live)
 	var summary := ""
 	if result.get("ok", false) and result.get("json") is Dictionary:
@@ -351,9 +382,54 @@ func _should_regenerate(report: Dictionary, local_fixes: bool) -> bool:
 func _abort_turn(snapshot: Dictionary, started_ms: int, model: String, tally: Dictionary, error_kind: String, message: String) -> void:
 	_publish_turn_timing(Time.get_ticks_msec() - started_ms, model, tally)
 	_restore(snapshot)
+	_turn_snapshot = {}
 	_sync_dialogues()
 	llm_error.emit(error_kind, message)
 	_end_busy()
+
+
+func _drop_turn() -> void:
+	_turn_token += 1
+	_turn_snapshot = {}
+	if is_busy:
+		is_busy = false
+		busy_changed.emit(false)
+
+
+func _turn_current(token: int) -> bool:
+	return token == _turn_token
+
+
+func _reply_missing(result: Dictionary) -> bool:
+	if not result.get("ok", false):
+		return true
+	if not _read_choice(result).reply_complete():
+		return true
+	var payload: Variant = result.get("json", {})
+	if payload is Dictionary and str((payload as Dictionary).get("reply", "")).strip_edges() == "":
+		return true
+	return false
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_save_for_suspend()
+
+
+func _save_for_suspend() -> void:
+	if state == null or state.case_id.strip_edges() == "":
+		return
+	var saved := false
+	if is_busy and not _turn_snapshot.is_empty():
+		var frozen := GameState.from_dict(_turn_snapshot)
+		frozen.case_id = state.case_id
+		frozen.case_version_hash = state.case_version_hash
+		saved = SaveState.write_state(frozen)
+	else:
+		_sync_dialogues()
+		saved = _autosave()
+	if not saved:
+		save_failed.emit("Не удалось записать сохранение.")
 
 
 func _end_busy() -> void:

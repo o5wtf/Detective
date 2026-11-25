@@ -137,6 +137,95 @@ func test_summary_runs_after_the_reply_and_falls_back() -> void:
 	mock.free()
 
 
+func test_two_blocked_replies_stop_without_a_third() -> void:
+	assert_true(_boot(), "фикстура хода не открылась")
+	var mock := _use_mock()
+	var blocked := {"ok": false, "json": {}, "raw_text": "", "error": "blocked", "retry_after_s": 0.0, "message": ""}
+	mock.enqueue(blocked)
+	mock.enqueue(blocked)
+	mock.enqueue(_reply("k1", "lie", "Этого запроса быть не должно."))
+	var messages: Array[String] = []
+	Game.llm_error.connect(func(_kind: String, message: String) -> void: messages.append(message))
+	await Game.ask("a", "Где вы были?")
+	assert_eq(mock.calls.size(), 2)
+	assert_eq(messages[0], UiStrings.REPHRASE)
+	assert_false(Game.is_busy)
+	assert_eq(Game.state.heard.size(), 0)
+	mock.free()
+
+
+func test_save_lands_before_the_summary_and_a_new_turn_does_not_wait() -> void:
+	assert_true(_boot(), "фикстура хода не открылась")
+	var dialogue: DialogueState = Game._dialogues["a"]
+	for index in 10:
+		dialogue.append_message("player" if index % 2 == 0 else "agent", "реплика", 1)
+	var mock := _HoldSummary.new()
+	mock.hold_role = "summary"
+	LLM.add_child(mock)
+	LLM.client = mock
+	mock.queue.append(_reply("k1", "lie", "Я держусь своей версии."))
+	var ask: Variant = Game.call("ask", "a", "Где вы были?")
+	while mock.calls.size() < 2:
+		await (Engine.get_main_loop() as SceneTree).process_frame
+	assert_false(Game.is_busy)
+	var saved := SaveState.read(Game.state.case_id)
+	assert_true(bool(saved.get("ok", false)))
+	assert_true(JSON.stringify(saved.get("state", {})).contains("Я держусь своей версии."))
+	mock.queue.append(_reply("k1", "lie", "Второй ответ."))
+	var second: Variant = Game.call("ask", "a", "Ещё?")
+	while mock.calls.size() < 3:
+		await (Engine.get_main_loop() as SceneTree).process_frame
+	assert_false(Game.is_busy)
+	assert_eq(str(mock.calls[2].get("model_role", "")), "dialogue")
+	mock.release_summary = true
+	await ask
+	await second
+	assert_false(Game.is_busy)
+	mock.free()
+
+
+func test_open_case_discards_the_turn_in_flight() -> void:
+	assert_true(_boot(), "фикстура хода не открылась")
+	var mock := _HoldSummary.new()
+	LLM.add_child(mock)
+	LLM.client = mock
+	var ask: Variant = Game.call("ask", "a", "Где вы были?")
+	while mock.calls.is_empty():
+		await (Engine.get_main_loop() as SceneTree).process_frame
+	assert_true(Game.is_busy)
+	var fresh := Game.open_case(FIXTURE)
+	assert_true(fresh.ok)
+	assert_false(Game.is_busy)
+	mock.release_summary = true
+	mock.queue.append(_reply("k1", "lie", "Поздно."))
+	await ask
+	assert_eq(Game.state.heard.size(), 0)
+	assert_false(Game.is_busy)
+	mock.free()
+
+
+func test_pause_during_a_turn_writes_the_snapshot_from_before_it() -> void:
+	assert_true(_boot(), "фикстура хода не открылась")
+	var before := JSON.stringify(Game.state.to_dict())
+	var mock := _HoldSummary.new()
+	LLM.add_child(mock)
+	LLM.client = mock
+	var ask: Variant = Game.call("ask", "a", "Где вы были?")
+	while mock.calls.is_empty():
+		await (Engine.get_main_loop() as SceneTree).process_frame
+	Game.state.pressure["a"] = 99
+	Game._notification(Node.NOTIFICATION_APPLICATION_PAUSED)
+	var saved := SaveState.read(Game.state.case_id)
+	assert_true(bool(saved.get("ok", false)))
+	assert_false(JSON.stringify(saved.get("state", {})).contains("\"a\": 99"))
+	var saved_pressure: Dictionary = saved.get("state", {}).get("pressure", {})
+	assert_eq(int(saved_pressure.get("a", -1)), int(JSON.parse_string(before).get("pressure", {}).get("a", -2)))
+	mock.release_summary = true
+	mock.queue.append(_reply("k1", "lie", "Дальше."))
+	await ask
+	mock.free()
+
+
 func _boot() -> bool:
 	var loaded := Game.open_case(FIXTURE)
 	return loaded.ok
@@ -176,3 +265,21 @@ func _heard(agent_id: String, fact_id: String, form: String) -> bool:
 		if str(row["agent_id"]) == agent_id and str(row["fact_id"]) == fact_id and str(row["form"]) == form:
 			return true
 	return false
+
+
+class _HoldSummary:
+	extends LLMClient
+
+	var queue: Array = []
+	var calls: Array = []
+	var hold_role: String = "dialogue"
+	var release_summary: bool = false
+
+	func generate(request: Dictionary) -> Dictionary:
+		calls.append(request.duplicate(true))
+		if str(request.get("model_role", "")) == hold_role and not release_summary:
+			while not release_summary:
+				await get_tree().process_frame
+		if queue.is_empty():
+			return {"ok": false, "json": {}, "raw_text": "", "error": "bad_response", "retry_after_s": 0.0, "message": ""}
+		return queue.pop_front()

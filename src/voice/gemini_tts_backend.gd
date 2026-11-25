@@ -949,6 +949,11 @@ class GeminiTtsTransport:
 	var _api_key: String = ""
 	var _result: Dictionary = {}
 	var _timer: Timer = null
+	var _parked: Object = null
+	var _parked_ms: int = 0
+	var _reused: bool = false
+	var _stale_tried: bool = false
+	var _saw_code: bool = false
 
 	func _ready() -> void:
 		process_mode = Node.PROCESS_MODE_ALWAYS
@@ -968,6 +973,9 @@ class GeminiTtsTransport:
 		cancelled = true
 		if _phase != "":
 			_tick()
+		elif _parked != null:
+			_parked.close()
+			_parked = null
 
 	func stream(request: Dictionary) -> Dictionary:
 		cancelled = false
@@ -984,10 +992,14 @@ class GeminiTtsTransport:
 		_path = str(request.get("path", ""))
 		_body = JSON.stringify(request.get("body", {}))
 		_api_key = str(request.get("api_key", ""))
-		_http = _make_http()
-		var err: int = _http.connect_to_host(HttpSession.HOST, 443, TLSOptions.client())
-		if err != OK:
-			return _close_with(_outcome(false, 0, "offline", 0.0, {}))
+		_stale_tried = false
+		_saw_code = false
+		_http = _take_client()
+		TurnTiming.note_tts_reused(_reused)
+		if not _reused:
+			var err: int = _http.connect_to_host(HttpSession.HOST, 443, TLSOptions.client())
+			if err != OK:
+				return _close_with(_outcome(false, 0, "offline", 0.0, {}))
 		_phase = "connect"
 		if _timer != null:
 			_timer.start()
@@ -1010,6 +1022,8 @@ class GeminiTtsTransport:
 			if state == HTTPClient.STATUS_CONNECTING or state == HTTPClient.STATUS_RESOLVING:
 				return
 			if state != HTTPClient.STATUS_CONNECTED:
+				if _retry_stale():
+					return
 				_exit = "connect_%d" % state
 				_complete(_outcome(false, 0, "offline", 0.0, {}))
 				return
@@ -1018,7 +1032,9 @@ class GeminiTtsTransport:
 				"x-goog-api-key: %s" % _api_key,
 			])
 			var err: int = _http.request(HTTPClient.METHOD_POST, _path, headers, _body)
-			if err != OK:
+			if err != OK or _link_dropped():
+				if _retry_stale():
+					return
 				_exit = "request_%d" % err
 				_complete(_outcome(false, 0, "offline", 0.0, {}))
 				return
@@ -1028,6 +1044,7 @@ class GeminiTtsTransport:
 			if state == HTTPClient.STATUS_REQUESTING:
 				return
 			_status = int(_http.get_response_code())
+			_saw_code = true
 			_content_type = _header_value("content-type")
 			if _status == 200:
 				_decoder = GeminiSseDecoder.new()
@@ -1080,8 +1097,14 @@ class GeminiTtsTransport:
 		_phase = ""
 		if _timer != null:
 			_timer.stop()
-		if _http != null:
+		var keep := bool(outcome.get("ok", false)) and not cancelled and _http != null and int(_http.get_status()) == HTTPClient.STATUS_CONNECTED
+		if keep:
+			_parked = _http
+			_parked_ms = _now_ms()
+			_http = null
+		elif _http != null:
 			_http.close()
+			_http = null
 		_result = outcome
 		outcome["diag"] = _diag()
 		_result = outcome
@@ -1099,6 +1122,42 @@ class GeminiTtsTransport:
 		if clock_ms.is_valid():
 			return int(clock_ms.call())
 		return Time.get_ticks_msec()
+
+	func _take_client() -> Object:
+		if _parked != null:
+			var age := _now_ms() - _parked_ms
+			var alive := int(_parked.get_status()) == HTTPClient.STATUS_CONNECTED and age <= int(HttpSession.IDLE_REUSE_S * 1000.0)
+			if alive:
+				var kept: Object = _parked
+				_parked = null
+				_reused = true
+				return kept
+			_parked.close()
+			_parked = null
+		_reused = false
+		return _make_http()
+
+
+	func _retry_stale() -> bool:
+		if not _reused or _stale_tried or _saw_code:
+			return false
+		_stale_tried = true
+		_reused = false
+		if _http != null:
+			_http.close()
+		_http = _make_http()
+		var err: int = _http.connect_to_host(HttpSession.HOST, 443, TLSOptions.client())
+		TurnTiming.note_tts_reused(false)
+		if err != OK:
+			return false
+		_phase = "connect"
+		return true
+
+
+	func _link_dropped() -> bool:
+		var state := int(_http.get_status())
+		return state == HTTPClient.STATUS_DISCONNECTED or state == HTTPClient.STATUS_CONNECTION_ERROR
+
 
 	func _make_http() -> Object:
 		if http_factory.is_valid():
