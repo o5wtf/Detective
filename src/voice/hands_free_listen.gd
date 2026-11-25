@@ -100,7 +100,7 @@ func _recognize(pcm: PackedByteArray) -> void:
 	var token := _generation
 	locked = true
 	_set_state(STATE_RECOGNIZE)
-	TurnTiming.begin("gemini")
+	TurnTiming.begin(_backend_name())
 	var wav := VoiceAudio.wav_bytes(pcm, PhraseVad.RATE)
 	var result := {"ok": false, "text": "", "error": "offline"}
 	if stt != null:
@@ -128,6 +128,12 @@ func _recognize(pcm: PackedByteArray) -> void:
 	if token != _generation:
 		return
 	_set_state(_idle_state())
+
+
+func _backend_name() -> String:
+	if SettingsStore.load_current().stt_backend == "parakeet":
+		return "parakeet"
+	return "gemini"
 
 
 func _idle_state() -> String:
