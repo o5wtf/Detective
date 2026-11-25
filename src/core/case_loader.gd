@@ -113,24 +113,7 @@ static func _fact(raw: Dictionary) -> CaseData.Fact:
 	fact.requires_evidence = raw.get("requires_evidence") == true
 	fact.requires_broken_lies = _strings(raw.get("requires_broken_lies"))
 	fact.breaks_lie_on = _breaks(raw.get("breaks_lie_on"))
-	fact.partial_truth = _partials(raw.get("partial_truth"))
 	return fact
-
-
-static func _partials(value: Variant) -> Array[Dictionary]:
-	var result: Array[Dictionary] = []
-	if value is not Array:
-		return result
-	for item in value:
-		if item is not Dictionary:
-			continue
-		var body := item as Dictionary
-		result.append({
-			"source": _string(body.get("source")),
-			"id": _string(body.get("id")),
-			"text": _string(body.get("text")),
-		})
-	return result
 
 
 static func _evidence(raw: Dictionary) -> CaseData.EvidenceItem:

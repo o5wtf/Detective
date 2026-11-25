@@ -229,61 +229,82 @@ func test_unlock_conditions() -> void:
 	assert_false(contradiction_engine.state.unlocked_evidence.has("any_c"))
 
 
-func test_citation_breaks_only_a_heard_pair() -> void:
-	var data := _case()
-	var lie := _fact(data, "a", "fa", 0, 0)
-	_as_lie(lie, "must_lie", "ложь", "evidence")
-	_fact(data, "b", "fb", 0, 0)
-	_contradiction(data, "c", "fa", "lie", "fb", "truth")
-	var engine := _engine(data)
+func test_commit_plan_does_not_break_a_lie_before_its_requirements() -> void:
+	var loaded := CaseLoader.load_case(REAL_CASE)
+	assert_true(loaded.ok)
+	var engine := RulesEngine.new(loaded.case_data, GameState.new())
 	engine.start_new()
-	engine.register_statements("a", [{"fact_id": "fa", "form": "lie"}])
-	var pressure_before := int(engine.state.pressure["a"])
-	var missed: Array = engine.apply_citations("a", ["fb", "nope"])
-	assert_eq(missed.size(), 0)
-	assert_false(engine.state.broken_lies.has("fa"))
-	assert_eq(int(engine.state.pressure["a"]), pressure_before)
-	engine.register_statements("b", [{"fact_id": "fb", "form": "basic"}])
-	assert_true(engine.state.contradictions.has("c"))
-	assert_false(engine.state.broken_lies.has("fa"))
-	pressure_before = int(engine.state.pressure["a"])
-	var own: Array = engine.apply_citations("a", ["fa"])
-	assert_eq(own.size(), 0)
-	assert_false(engine.state.broken_lies.has("fa"))
-	var hit: Array = engine.apply_citations("a", ["fb"])
-	assert_true(engine.state.broken_lies.has("fa"))
-	assert_eq(_level(engine, "fa"), "full")
-	assert_eq(engine.get_packet("a")[0]["mode"], "full")
-	assert_eq(int(engine.state.pressure["a"]), pressure_before)
-	assert_false(hit.is_empty())
+	engine.commit_plan("arkady_volkov", {"break_lies": ["fact_arkady_panic"], "present": [], "unlock": [], "touch": []})
+	assert_false(engine.state.broken_lies.has("fact_arkady_panic"))
+	engine.state.broken_lies.append("fact_arkady_meeting")
+	engine.state.broken_lies.append("fact_arkady_knife")
+	engine.commit_plan("arkady_volkov", {"break_lies": ["fact_arkady_panic"], "present": [], "unlock": [], "touch": []})
+	assert_true(engine.state.broken_lies.has("fact_arkady_panic"))
 
 
-func test_evidence_mention_unlocks_for_the_right_speaker() -> void:
-	var data := _case()
-	_evidence(data, "open", [], false)
-	_evidence(data, "log", [], false, {
-		"type": "evidence_mentioned",
-		"agent_id": "b",
-		"evidence_id": "log",
-		"topic": "кто входил и выходил",
-	})
-	var engine := _engine(data)
+func test_button_and_voice_break_the_same_lies() -> void:
+	var loaded := CaseLoader.load_case(REAL_CASE)
+	assert_true(loaded.ok)
+	var data := loaded.case_data
+	var knife: CaseData.EvidenceItem = data.evidence_by_id["ev_kitchen_knife"]
+	assert_true(knife.related_fact_ids.has("fact_arkady_panic"))
+	for evidence in data.evidence:
+		for agent in data.agents:
+			var button := RulesEngine.new(data, GameState.new())
+			button.start_new()
+			var voice := RulesEngine.new(data, GameState.new())
+			voice.start_new()
+			if not button.state.unlocked_evidence.has(evidence.id):
+				button.state.unlocked_evidence.append(evidence.id)
+				voice.state.unlocked_evidence.append(evidence.id)
+			button.present_evidence(agent.id, evidence.id)
+			var options := TurnOptions.build(data, voice.state, agent.id)
+			var number := -1
+			for option in options:
+				if str(option.get("kind", "")) == "present" and str(option.get("evidence_id", "")) == evidence.id:
+					number = int(option.get("n", -1))
+			assert_true(number >= 0, evidence.id)
+			var plan := TurnOptions.plan(data, voice.state, agent.id, options, [number])
+			voice.commit_plan(agent.id, plan)
+			_assert_same_list(button.state.broken_lies, voice.state.broken_lies, evidence.id)
+			assert_eq(JSON.stringify(button.get_packet(agent.id)), JSON.stringify(voice.get_packet(agent.id)), evidence.id)
+
+
+func test_voice_knife_does_not_admit_the_confession_early() -> void:
+	var loaded := CaseLoader.load_case(REAL_CASE)
+	var data := loaded.case_data
+	var engine := RulesEngine.new(data, GameState.new())
 	engine.start_new()
-	assert_true(engine.state.unlocked_evidence.has("open"))
-	assert_false(engine.state.unlocked_evidence.has("log"))
-	engine.note_mentions("a", ["e2"], "")
-	assert_false(engine.state.unlocked_evidence.has("log"))
-	engine.note_mentions("b", ["e9"], "")
-	assert_false(engine.state.unlocked_evidence.has("log"))
-	engine.note_mentions("b", ["e2"], "")
-	assert_true(engine.state.unlocked_evidence.has("log"))
-	var fresh := _engine(data)
-	fresh.start_new()
-	fresh.note_mentions("b", [], "e2")
-	assert_true(fresh.state.unlocked_evidence.has("log"))
-	var old := GameState.from_dict({"pressure": {"a": 3}})
-	assert_false(old.evidence_mentions.has("log"))
-	assert_eq(int(old.pressure["a"]), 3)
+	var options := TurnOptions.build(data, engine.state, "arkady_volkov")
+	var number := -1
+	for option in options:
+		if str(option.get("evidence_id", "")) == "ev_kitchen_knife":
+			number = int(option.get("n", -1))
+	var plan := TurnOptions.plan(data, engine.state, "arkady_volkov", options, [number])
+	assert_false((plan["break_lies"] as Array).has("fact_arkady_panic"))
+	assert_true((plan["break_lies"] as Array).has("fact_arkady_knife"))
+	var admitted := " ".join(plan["admit"])
+	assert_false(admitted.contains("ударил"))
+	if not engine.state.unlocked_evidence.has("ev_financial_docs"):
+		engine.state.unlocked_evidence.append("ev_financial_docs")
+	options = TurnOptions.build(data, engine.state, "arkady_volkov")
+	var docs := -1
+	for option in options:
+		if str(option.get("evidence_id", "")) == "ev_financial_docs":
+			docs = int(option.get("n", -1))
+	assert_true(docs >= 0)
+	var money := TurnOptions.plan(data, engine.state, "arkady_volkov", options, [docs])
+	assert_true(" ".join(money["admit"]).contains("Должен Виктору около 2,5 млн."))
+
+
+func test_confession_opens_in_the_simulation() -> void:
+	var loaded := CaseLoader.load_case(REAL_CASE)
+	for tone in [0, 15]:
+		var snapshot := SimHarness.run(loaded.case_data, tone)
+		assert_eq(str(snapshot["fact_levels"]["fact_arkady_panic"]), "full", "признание")
+		assert_eq(str(snapshot["fact_levels"]["fact_mira_knife"]), "full", "нож ломает показание Миры")
+		for evidence_id in ["ev_crime_scene", "ev_financial_docs", "ev_security_log", "ev_kitchen_knife"]:
+			assert_true((snapshot["unlocked_evidence"] as Array).has(evidence_id), evidence_id)
 
 
 func test_contradiction_turn_and_filter() -> void:

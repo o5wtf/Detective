@@ -22,9 +22,15 @@ func _ready() -> void:
 	for side in ["margin_left", "margin_top", "margin_right", "margin_bottom"]:
 		margin.add_theme_constant_override(side, 24)
 	add_child(margin)
+	var scroll := ScrollContainer.new()
+	scroll.name = "AccusationScroll"
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	margin.add_child(scroll)
 	var column := VBoxContainer.new()
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	margin.add_child(column)
+	scroll.add_child(column)
 	column.add_child(UiWidgets.label(UiStrings.ACCUSE, "TitleLabel"))
 	column.add_child(UiWidgets.label("Кто"))
 	_killer = _options("KillerOption")

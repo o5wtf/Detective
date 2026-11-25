@@ -66,7 +66,6 @@ static func build(case_data: CaseData, state: GameState, agent_id: String) -> Ar
 				continue
 			var speaker := _speaker(case_data, str(entry.get("agent_id", "")))
 			var quote := Notebook.text_for(case_data.fact_by_id.get(fact_id) as CaseData.Fact, form)
-			var lie: CaseData.Fact = case_data.fact_by_id.get(lie_id) as CaseData.Fact
 			options.append({
 				"n": number,
 				"kind": "cite",
@@ -77,7 +76,7 @@ static func build(case_data: CaseData, state: GameState, agent_id: String) -> Ar
 				"title": "",
 				"topic": "",
 				"text": "игрок прямо говорит, что %s сказал: «%s»" % [speaker, quote],
-				"admit": _slice_or_full(case_data, state, lie, "contradiction", contradiction.id),
+				"admit": _truth(case_data, state, lie_id),
 			})
 			number += 1
 	if options.is_empty():
@@ -129,7 +128,6 @@ static func plan(case_data: CaseData, state: GameState, agent_id: String, option
 		"touch": [] as Array[String],
 		"break_lies": [] as Array[String],
 		"present": [] as Array[String],
-		"grants": [] as Array[Dictionary],
 		"admit": [] as Array,
 		"restart": false,
 		"picked": picked,
@@ -160,18 +158,8 @@ static func plan(case_data: CaseData, state: GameState, agent_id: String, option
 			result["decision"] = "present"
 		elif kind == "cite" and _cite_ok(case_data, state, agent_id, option):
 			var lie_id := str(option.get("lie_id", ""))
-			var lie: CaseData.Fact = case_data.fact_by_id.get(lie_id) as CaseData.Fact
 			var admit := str(option.get("admit", ""))
-			if lie != null and not lie.partial_truth.is_empty():
-				if admit != "":
-					(result["grants"] as Array).append({
-						"lie_id": lie_id,
-						"source": "contradiction",
-						"id": str(option.get("contradiction_id", "")),
-						"text": admit,
-					})
-					(result["admit"] as Array).append(admit)
-			elif not (result["break_lies"] as Array).has(lie_id):
+			if not (result["break_lies"] as Array).has(lie_id):
 				(result["break_lies"] as Array).append(lie_id)
 				if admit != "":
 					(result["admit"] as Array).append(admit)
@@ -197,22 +185,15 @@ static func _present_grants(case_data: CaseData, state: GameState, agent_id: Str
 		if str(case_data.fact_owner[fact_id]) != agent_id:
 			continue
 		var fact: CaseData.Fact = case_data.fact_by_id.get(fact_id) as CaseData.Fact
-		if fact == null or not fact.is_lie:
+		if fact == null or not fact.is_lie or state.broken_lies.has(fact.id):
 			continue
-		if not fact.related_evidence_ids.has(evidence_id):
+		if not fact.related_evidence_ids.has(evidence_id) or not _breaks_on_evidence(fact):
 			continue
-		var slice := _slice(fact, "evidence", evidence_id)
-		if not fact.partial_truth.is_empty():
-			if slice == "" or _slice_open(state, fact.id, "evidence", evidence_id):
-				continue
-			(result["grants"] as Array).append({"lie_id": fact.id, "source": "evidence", "id": evidence_id, "text": slice})
-			(result["admit"] as Array).append(slice)
-		elif state.broken_lies.has(fact.id):
+		if not _requirements_open(state, fact):
 			continue
-		elif _breaks_on_evidence(fact):
-			if not (result["break_lies"] as Array).has(fact.id):
-				(result["break_lies"] as Array).append(fact.id)
-				(result["admit"] as Array).append(_truth(case_data, state, fact.id))
+		if not (result["break_lies"] as Array).has(fact.id):
+			(result["break_lies"] as Array).append(fact.id)
+			(result["admit"] as Array).append(_truth(case_data, state, fact.id, evidence_id))
 
 
 static func _breaks_on_evidence(fact: CaseData.Fact) -> bool:
@@ -224,27 +205,11 @@ static func _breaks_on_evidence(fact: CaseData.Fact) -> bool:
 	return false
 
 
-static func _slice_or_full(case_data: CaseData, state: GameState, fact: CaseData.Fact, source: String, source_id: String) -> String:
-	if fact == null:
-		return ""
-	if fact.partial_truth.is_empty():
-		return _truth(case_data, state, fact.id)
-	return _slice(fact, source, source_id)
-
-
-static func _slice_open(state: GameState, fact_id: String, source: String, source_id: String) -> bool:
-	var rows: Array = state.revealed_parts.get(fact_id, [])
-	for row in rows:
-		if row is Dictionary and str(row.get("source", "")) == source and str(row.get("id", "")) == source_id:
-			return true
-	return false
-
-
-static func _slice(fact: CaseData.Fact, source: String, source_id: String) -> String:
-	for item in fact.partial_truth:
-		if str(item.get("source", "")) == source and str(item.get("id", "")) == source_id:
-			return str(item.get("text", ""))
-	return ""
+static func _requirements_open(state: GameState, fact: CaseData.Fact) -> bool:
+	for fact_id in fact.requires_broken_lies:
+		if not state.broken_lies.has(fact_id):
+			return false
+	return true
 
 
 static func _option(options: Array, number: int) -> Dictionary:
@@ -257,14 +222,12 @@ static func _option(options: Array, number: int) -> Dictionary:
 static func _cite_ok(case_data: CaseData, state: GameState, agent_id: String, option: Dictionary) -> bool:
 	var fact_id := str(option.get("fact_id", ""))
 	var lie_id := str(option.get("lie_id", ""))
-	if fact_id == "" or lie_id == "":
-		return false
-	if state.broken_lies.has(lie_id) and _slice_open(state, lie_id, "contradiction", str(option.get("contradiction_id", ""))):
+	if fact_id == "" or lie_id == "" or state.broken_lies.has(lie_id):
 		return false
 	if str(case_data.fact_owner.get(lie_id, "")) != agent_id:
 		return false
 	var fact: CaseData.Fact = case_data.fact_by_id.get(lie_id) as CaseData.Fact
-	if fact == null or not fact.is_lie:
+	if fact == null or not fact.is_lie or not _requirements_open(state, fact):
 		return false
 	for contradiction in case_data.contradictions:
 		var matched := _paired_lie(case_data, state, agent_id, fact_id, _heard_form(state, agent_id, fact_id), contradiction)
@@ -295,10 +258,10 @@ static func _paired_lie(case_data: CaseData, state: GameState, agent_id: String,
 		var lie_id := str(pair[2])
 		if str(case_data.fact_owner.get(lie_id, "")) != agent_id:
 			continue
-		if state.broken_lies.has(lie_id) and _slice_open(state, lie_id, "contradiction", contradiction.id):
+		if state.broken_lies.has(lie_id):
 			continue
 		var fact: CaseData.Fact = case_data.fact_by_id.get(lie_id) as CaseData.Fact
-		if fact != null and fact.is_lie:
+		if fact != null and fact.is_lie and _requirements_open(state, fact):
 			return lie_id
 	return ""
 
@@ -341,16 +304,17 @@ static func _speaker(case_data: CaseData, agent_id: String) -> String:
 	return "%s, %s" % [agent.name, agent.role]
 
 
-static func _truth(case_data: CaseData, state: GameState, lie_id: String) -> String:
+static func _truth(case_data: CaseData, state: GameState, lie_id: String, shown_evidence_id: String = "") -> String:
 	var fact: CaseData.Fact = case_data.fact_by_id.get(lie_id) as CaseData.Fact
 	if fact == null:
 		return ""
-	var shown := false
+	var shown := shown_evidence_id != "" and fact.related_evidence_ids.has(shown_evidence_id)
 	var owner := str(case_data.fact_owner.get(lie_id, ""))
-	for evidence_id in fact.related_evidence_ids:
-		var agents: Array = state.shown.get(evidence_id, [])
-		if agents.has(owner):
-			shown = true
+	if not shown:
+		for evidence_id in fact.related_evidence_ids:
+			var agents: Array = state.shown.get(evidence_id, [])
+			if agents.has(owner):
+				shown = true
 	if fact.requires_evidence and not shown:
 		return fact.content_basic
 	return fact.content_full if fact.content_full != "" else fact.content_basic

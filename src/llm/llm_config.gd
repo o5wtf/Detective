@@ -42,15 +42,49 @@ static func canonical_model(model: String) -> String:
 	return DEFAULT_DIALOGUE_MODEL
 
 
+static var _cached: LLMConfig
+static var _cached_hash: String = ""
+static var _cached_env: String = ""
+
+
+static func invalidate_cache() -> void:
+	_cached = null
+	_cached_hash = ""
+	_cached_env = ""
+
+
 static func load_settings() -> LLMConfig:
+	var env := OS.get_environment("GEMINI_API_KEY")
+	var digest := _file_hash()
+	if _cached != null and digest == _cached_hash and env == _cached_env:
+		return _cached.detached()
 	_migrate_saved_settings()
 	var user_text := _read_text("user://config.cfg")
 	var debug := OS.is_debug_build()
 	var dev_text := _read_text("res://config/dev.cfg") if debug else ""
-	var config := from_sources(user_text, OS.get_environment("GEMINI_API_KEY"), dev_text, debug)
+	var config := from_sources(user_text, env, dev_text, debug)
 	config.dialogue_model = canonical_model(config.dialogue_model)
 	config.summary_model = config.dialogue_model
-	return config
+	_cached = config
+	_cached_hash = _file_hash()
+	_cached_env = env
+	return config.detached()
+
+
+func detached() -> LLMConfig:
+	var copy := LLMConfig.new()
+	copy.provider = provider
+	copy.api_key = api_key
+	copy.key_source = key_source
+	copy.dialogue_model = dialogue_model
+	copy.summary_model = summary_model
+	copy.thinking_level = thinking_level
+	copy.timeout_s = timeout_s
+	copy.ping_timeout_s = ping_timeout_s
+	copy.min_interval_s = min_interval_s
+	copy.summary_after_reply = summary_after_reply
+	copy.local_fixes = local_fixes
+	return copy
 
 
 static func from_sources(user_text: String, env_key: String, dev_text: String, debug: bool) -> LLMConfig:
@@ -136,7 +170,15 @@ static func _migrate_saved_settings() -> void:
 		file.set_value("llm", "settings_version", SETTINGS_VERSION)
 		changed = true
 	if changed:
+		invalidate_cache()
 		file.save(path)
+
+
+static func _file_hash() -> String:
+	var path := "user://config.cfg"
+	if not FileAccess.file_exists(path):
+		return ""
+	return FileAccess.get_sha256(path)
 
 
 static func _thinking_level(raw: String) -> String:

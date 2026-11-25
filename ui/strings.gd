@@ -233,5 +233,7 @@ static func evidence_kind(type_name: String) -> String:
 			return "предмет"
 		"place", "location", "место":
 			return "место"
+		"scene", "сцена":
+			return "сцена"
 		_:
 			return type_name

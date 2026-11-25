@@ -22,7 +22,7 @@ func entries() -> Array[Dictionary]:
 			"turn": int(heard.get("turn", 0)),
 			"fact_id": fact_id,
 			"form": form,
-			"text": text_for(fact, form, _revealed(fact_id)),
+			"text": text_for(fact, form),
 		})
 	return rows
 
@@ -54,25 +54,14 @@ func _involves(contradiction: CaseData.Contradiction, agent_id: String) -> bool:
 	return false
 
 
-static func text_for(fact: CaseData.Fact, form: String, revealed: String = "") -> String:
+static func text_for(fact: CaseData.Fact, form: String) -> String:
 	if fact == null:
 		return ""
 	if form == "lie":
 		return fact.lie_text
 	if form == "full":
-		if not fact.partial_truth.is_empty():
-			return revealed if revealed != "" else fact.content_basic
 		return fact.content_full
 	return fact.content_basic
-
-
-func _revealed(fact_id: String) -> String:
-	var rows: Array = state.revealed_parts.get(fact_id, [])
-	var parts: PackedStringArray = PackedStringArray()
-	for row in rows:
-		if row is Dictionary and str(row.get("text", "")) != "":
-			parts.append(str(row.get("text", "")))
-	return " ".join(parts)
 
 
 func to_dict() -> Dictionary:

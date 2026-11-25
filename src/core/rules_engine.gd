@@ -37,46 +37,6 @@ func note_question(agent_id: String) -> Array:
 	return _resolve()
 
 
-func apply_citations(agent_id: String, cited_ids: Array) -> Array:
-	var events: Array = []
-	var changed := false
-	for raw_id in cited_ids:
-		var fact_id := str(raw_id)
-		if fact_id == "" or fact_id == "none":
-			continue
-		for contradiction in case_data.contradictions:
-			var lie_id := _cited_lie(agent_id, fact_id, contradiction)
-			if lie_id == "" or state.broken_lies.has(lie_id):
-				continue
-			state.broken_lies.append(lie_id)
-			events.append({"type": "lie_broken", "fact_id": lie_id, "agent_id": agent_id})
-			changed = true
-	if changed:
-		events.append_array(_resolve())
-	return events
-
-
-func note_mentions(agent_id: String, mentioned_keys: Array, requested_key: String) -> Array:
-	var events: Array = []
-	var changed := false
-	for row in _mention_rows(agent_id):
-		var key := str(row.get("key", ""))
-		var evidence_id := str(row.get("evidence_id", ""))
-		var named := false
-		for item in mentioned_keys:
-			if str(item) == key:
-				named = true
-		if requested_key == key:
-			named = true
-		if not named or evidence_id == "" or state.evidence_mentions.has(evidence_id):
-			continue
-		state.evidence_mentions.append(evidence_id)
-		changed = true
-	if changed:
-		events.append_array(_resolve())
-	return events
-
-
 func commit_plan(agent_id: String, plan: Dictionary) -> Array:
 	var events: Array = []
 	for key in plan.get("touch", []):
@@ -85,20 +45,12 @@ func commit_plan(agent_id: String, plan: Dictionary) -> Array:
 		var name := str(evidence_id)
 		if name != "" and not state.evidence_mentions.has(name):
 			state.evidence_mentions.append(name)
-	for grant in plan.get("grants", []):
-		if grant is not Dictionary:
-			continue
-		var body := grant as Dictionary
-		var fact: CaseData.Fact = case_data.fact_by_id.get(str(body.get("lie_id", ""))) as CaseData.Fact
-		if fact == null:
-			continue
-		var granted := _grant_slice(fact, str(body.get("source", "")), str(body.get("id", "")))
-		if granted != "" and not state.broken_lies.has(fact.id):
-			state.broken_lies.append(fact.id)
-			events.append({"type": "lie_broken", "fact_id": fact.id, "agent_id": agent_id})
 	for lie_id in plan.get("break_lies", []):
 		var name := str(lie_id)
 		if name == "" or state.broken_lies.has(name):
+			continue
+		var fact: CaseData.Fact = case_data.fact_by_id.get(name) as CaseData.Fact
+		if fact == null or not _required_lies_broken(fact):
 			continue
 		state.broken_lies.append(name)
 		events.append({"type": "lie_broken", "fact_id": name, "agent_id": agent_id})
@@ -267,8 +219,6 @@ func _pass_facts(events: Array) -> void:
 	for agent in case_data.agents:
 		for fact in agent.facts:
 			if fact.is_lie and not state.broken_lies.has(fact.id):
-				if not fact.partial_truth.is_empty():
-					_open_shown_slices(fact)
 				if _lie_breaks(fact):
 					state.broken_lies.append(fact.id)
 					events.append({
@@ -276,10 +226,7 @@ func _pass_facts(events: Array) -> void:
 						"fact_id": fact.id,
 						"agent_id": agent.id,
 					})
-				else:
-					continue
-			elif fact.is_lie and not fact.partial_truth.is_empty():
-				_open_shown_slices(fact)
+				continue
 			var current := str(state.fact_levels.get(fact.id, "closed"))
 			var desired := _desired_level(fact)
 			if _rank(desired) > _rank(current):
@@ -352,37 +299,6 @@ func _required_lies_broken(fact: CaseData.Fact) -> bool:
 	return true
 
 
-func _open_shown_slices(fact: CaseData.Fact) -> void:
-	var owner := str(case_data.fact_owner.get(fact.id, ""))
-	for evidence_id in fact.related_evidence_ids:
-		if _shown_to(evidence_id, owner):
-			_grant_slice(fact, "evidence", evidence_id)
-
-
-func _grant_slice(fact: CaseData.Fact, source: String, source_id: String) -> String:
-	for item in fact.partial_truth:
-		if str(item.get("source", "")) != source or str(item.get("id", "")) != source_id:
-			continue
-		var text := str(item.get("text", ""))
-		var rows: Array = state.revealed_parts.get(fact.id, [])
-		for row in rows:
-			if row is Dictionary and str(row.get("source", "")) == source and str(row.get("id", "")) == source_id:
-				return text
-		rows.append({"source": source, "id": source_id, "text": text})
-		state.revealed_parts[fact.id] = rows
-		return text
-	return ""
-
-
-func _revealed_text(fact: CaseData.Fact) -> String:
-	var rows: Array = state.revealed_parts.get(fact.id, [])
-	var parts: PackedStringArray = PackedStringArray()
-	for row in rows:
-		if row is Dictionary and str(row.get("text", "")) != "":
-			parts.append(str(row.get("text", "")))
-	return " ".join(parts)
-
-
 func _evidence_satisfied(fact: CaseData.Fact) -> bool:
 	if not fact.requires_evidence:
 		return true
@@ -400,8 +316,7 @@ func _basic_threshold_met(fact: CaseData.Fact) -> bool:
 func _packet_entry(fact: CaseData.Fact) -> Dictionary:
 	var broken := state.broken_lies.has(fact.id)
 	if fact.is_lie and not broken:
-		var revealed := _revealed_text(fact)
-		if fact.lie_type == "can_lie" and _basic_threshold_met(fact) and revealed == "":
+		if fact.lie_type == "can_lie" and _basic_threshold_met(fact):
 			return {
 				"fact_id": fact.id,
 				"mode": "lie_or_basic",
@@ -413,14 +328,6 @@ func _packet_entry(fact: CaseData.Fact) -> Dictionary:
 			"mode": "lie",
 			"lie_text": fact.lie_text,
 			"content": fact.lie_text,
-			"partial": revealed,
-		}
-	if fact.is_lie and broken and not fact.partial_truth.is_empty():
-		return {
-			"fact_id": fact.id,
-			"mode": "partial",
-			"lie_text": "",
-			"content": _revealed_text(fact),
 		}
 	var level := str(state.fact_levels.get(fact.id, "closed"))
 	if level == "full":
@@ -490,93 +397,6 @@ func _contradiction_side_heard(fact_id: String, form: String) -> bool:
 		return _journal_has(fact_id, "full")
 	if form == "truth":
 		return _journal_has(fact_id, "basic") or _journal_has(fact_id, "full")
-	return false
-
-
-func _mention_rows(agent_id: String) -> Array:
-	var known := 0
-	for evidence in case_data.evidence:
-		if state.unlocked_evidence.has(evidence.id):
-			known += 1
-	var rows: Array = []
-	var index := known + 1
-	for evidence in case_data.evidence:
-		if state.unlocked_evidence.has(evidence.id):
-			continue
-		var topic := _mention_topic(evidence.unlock_condition, agent_id, evidence.id)
-		if topic == "":
-			continue
-		rows.append({
-			"key": "e%d" % index,
-			"evidence_id": evidence.id,
-			"title": evidence.title,
-			"topic": topic,
-		})
-		index += 1
-	return rows
-
-
-func _mention_topic(cond: Variant, agent_id: String, evidence_id: String) -> String:
-	if cond is not Dictionary:
-		return ""
-	var body := cond as Dictionary
-	for op in ["AND", "OR"]:
-		if body.has(op) and body[op] is Array:
-			for sub in body[op]:
-				var topic := _mention_topic(sub, agent_id, evidence_id)
-				if topic != "":
-					return topic
-			return ""
-	if str(body.get("type", "")) != "evidence_mentioned":
-		return ""
-	if str(body.get("agent_id", "")) != agent_id:
-		return ""
-	if str(body.get("evidence_id", "")) != evidence_id:
-		return ""
-	var topic := str(body.get("topic", "")).strip_edges()
-	return topic if topic != "" else evidence_id
-
-
-func _cited_lie(agent_id: String, cited_id: String, contradiction: CaseData.Contradiction) -> String:
-	var pairs := [
-		[contradiction.fact_a_id, contradiction.fact_a_form, contradiction.fact_b_id, contradiction.fact_b_form],
-		[contradiction.fact_b_id, contradiction.fact_b_form, contradiction.fact_a_id, contradiction.fact_a_form],
-	]
-	for pair in pairs:
-		if str(pair[0]) != cited_id:
-			continue
-		if not _heard_by_other(str(pair[0]), str(pair[1]), agent_id):
-			continue
-		var lie_id := str(pair[2])
-		if str(pair[3]) != "lie":
-			continue
-		if str(case_data.fact_owner.get(lie_id, "")) != agent_id:
-			continue
-		var fact: CaseData.Fact = case_data.fact_by_id.get(lie_id) as CaseData.Fact
-		if fact == null or not fact.is_lie:
-			continue
-		return lie_id
-	return ""
-
-
-func _heard_by_other(fact_id: String, form: String, agent_id: String) -> bool:
-	for entry in state.heard:
-		if str(entry.get("agent_id", "")) == agent_id:
-			continue
-		if str(entry.get("fact_id", "")) != fact_id:
-			continue
-		if _journal_form_matches(str(entry.get("form", "")), form):
-			return true
-	return false
-
-
-func _journal_form_matches(journal_form: String, contradiction_form: String) -> bool:
-	if contradiction_form == "lie":
-		return journal_form == "lie"
-	if contradiction_form == "truth_full":
-		return journal_form == "full"
-	if contradiction_form == "truth":
-		return journal_form == "basic" or journal_form == "full"
 	return false
 
 

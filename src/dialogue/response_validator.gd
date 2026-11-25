@@ -336,7 +336,7 @@ static func _closed_source(packet: Array, context: Dictionary) -> String:
 		var mode := str((in_packet[fact.id] as Dictionary).get("mode", ""))
 		if mode == "basic" or mode == "lie_or_basic":
 			chunks.append(fact.content_full)
-		elif mode == "lie" or mode == "partial":
+		elif mode == "lie":
 			chunks.append(fact.content_basic)
 			chunks.append(fact.content_full)
 	return "\n".join(chunks)
@@ -353,8 +353,7 @@ static func _allowed_source(packet: Array, context: Dictionary) -> String:
 		var mode := str(body.get("mode", ""))
 		if mode == "lie" or mode == "lie_or_basic":
 			chunks.append(str(body.get("lie_text", "")))
-			chunks.append(str(body.get("partial", "")))
-		if mode == "basic" or mode == "full" or mode == "lie_or_basic" or mode == "partial":
+		if mode == "basic" or mode == "full" or mode == "lie_or_basic":
 			chunks.append(str(body.get("content", "")))
 	var case_data: CaseData = context.get("case_data")
 	var state: GameState = context.get("state")
