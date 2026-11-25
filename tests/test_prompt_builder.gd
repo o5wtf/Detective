@@ -174,11 +174,9 @@ func test_empty_relationship_is_omitted() -> void:
 
 func test_notebook_keeps_the_last_form_and_an_unbroken_lie() -> void:
 	var data := _sample_case()
-	var contradiction := CaseData.Contradiction.new()
-	contradiction.id = "c1"
-	contradiction.fact_a_id = "foreign"
-	contradiction.fact_b_id = "must"
-	data.contradictions.append(contradiction)
+	var must: CaseData.Fact = data.fact_by_id["must"]
+	must.breaks_with_explicit = true
+	must.breaks_with = [[{"type": "testimony_retold", "fact_id": "foreign"}]]
 	for index in 10:
 		var fact := CaseData.Fact.new()
 		fact.id = "extra%d" % index

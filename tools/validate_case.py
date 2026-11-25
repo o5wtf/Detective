@@ -162,10 +162,13 @@ def validate(case):
                 err(f"{p}: cannot_lie, но lie_text заполнен")
         if not is_lie and bl:
             err(f"{p}: у факта без лжи задан breaks_lie_on")
-        if "evidence" in bl and not rel:
+        has_sets = "breaks_with" in f
+        if not has_sets and "evidence" in bl and not rel:
             err(f"{p}: breaks_lie_on=evidence, но нет related_evidence_ids")
-        if "contradiction" in bl and fid not in lie_facts_in_contradictions:
+        if not has_sets and "contradiction" in bl and fid not in lie_facts_in_contradictions:
             err(f"{p}: breaks_lie_on=contradiction, но нет противоречия с этим фактом в форме lie")
+        if has_sets:
+            validate_break_sets(fid, f, facts, ev_ids, fact_owner, err)
 
     # Противоречия
     for cid, c in contr_ids.items():
@@ -252,6 +255,170 @@ def validate(case):
     return errors, warnings
 
 
+def effective_sets(fact, contradictions):
+    if "breaks_with" in fact and isinstance(fact.get("breaks_with"), list):
+        return fact["breaks_with"]
+    sets = []
+    modes = set(breaks_list(fact))
+    if "evidence" in modes:
+        for evidence_id in fact.get("related_evidence_ids", []):
+            sets.append([{"type": "evidence_shown", "evidence_id": evidence_id}])
+    if "contradiction" in modes:
+        for contradiction in contradictions:
+            partner = None
+            if contradiction.get("fact_a_id") == fact.get("id") and contradiction.get("fact_a_form") == "lie":
+                partner = (contradiction.get("fact_b_id"), contradiction.get("fact_b_form"))
+            elif contradiction.get("fact_b_id") == fact.get("id") and contradiction.get("fact_b_form") == "lie":
+                partner = (contradiction.get("fact_a_id"), contradiction.get("fact_a_form"))
+            if not partner or partner[1] not in ("truth", "truth_full"):
+                continue
+            item = {"type": "testimony_retold", "fact_id": partner[0]}
+            if partner[1] == "truth_full":
+                item["form"] = "truth_full"
+            sets.append([item])
+    return sets
+
+
+def witness_counts(target, witness_id, facts, owner, broken):
+    if not target.get("related_evidence_ids"):
+        return True
+    witness_owner = owner.get(witness_id)
+    for fid, fact in facts.items():
+        if owner.get(fid) != witness_owner or fid == witness_id or not fact.get("is_lie"):
+            continue
+        if fid in broken or not fact.get("related_evidence_ids"):
+            continue
+        if set(fact.get("related_evidence_ids", [])) & set(target.get("related_evidence_ids", [])):
+            return False
+    return True
+
+
+def set_holds(case, fact, liar, shown, retold, broken, owner, facts):
+    sets = [items for items in effective_sets(fact, case.get("contradictions", [])) if items]
+    if not sets:
+        return False
+
+    def item_ok(item):
+        kind = item.get("type")
+        if kind == "evidence_shown":
+            return (item.get("evidence_id"), liar) in shown
+        if kind != "testimony_retold":
+            return False
+        told = item.get("fact_id")
+        if not witness_counts(fact, told, facts, owner, broken):
+            return False
+        forms = {form for listener, fid, form in retold if listener == liar and fid == told}
+        if item.get("form") == "truth_full":
+            return "full" in forms
+        return "basic" in forms or "full" in forms
+
+    return any(all(item_ok(item) for item in items) for items in sets)
+
+
+def validate_break_sets(fid, fact, facts, ev_ids, fact_owner, err):
+    p = f"факт {fid}"
+    value = fact.get("breaks_with")
+    if not isinstance(value, list):
+        err(f"{p}: breaks_with не список наборов")
+        return
+    if not fact.get("is_lie") and value:
+        err(f"{p}: у факта без лжи задан breaks_with")
+    seen_sets = set()
+    for raw_set in value:
+        if not isinstance(raw_set, list) or not raw_set:
+            err(f"{p}: пустой набор")
+            continue
+        seen_items = set()
+        for item in raw_set:
+            if not isinstance(item, dict) or "AND" in item or "OR" in item:
+                err(f"{p}: в наборе недопустима группа И/ИЛИ")
+                continue
+            if "agent_id" in item:
+                err(f"{p}: в пункте набора не пишется agent_id")
+            kind = str(item.get("type", ""))
+            if kind == "evidence_shown":
+                evidence_id = item.get("evidence_id")
+                if evidence_id not in ev_ids:
+                    err(f"{p}: улика {evidence_id} не найдена")
+                mark = f"e:{evidence_id}"
+                if mark in seen_items:
+                    err(f"{p}: повтор пункта {evidence_id}")
+                seen_items.add(mark)
+            elif kind == "testimony_retold":
+                told = item.get("fact_id")
+                if told not in facts:
+                    err(f"{p}: показание {told} не найдено")
+                elif fact_owner.get(told) == fact_owner.get(fid):
+                    err(f"{p}: breaks_with пересказывает своё показание {told}")
+                form = str(item.get("form", ""))
+                if form not in ("", "truth_full"):
+                    err(f"{p}: форма пересказа '{form}' недопустима")
+                mark = f"t:{told}:{form}"
+                if mark in seen_items:
+                    err(f"{p}: повтор пересказа {told}")
+                seen_items.add(mark)
+            else:
+                err(f"{p}: неизвестный вид пункта '{kind}'")
+        fingerprint = json.dumps(raw_set, ensure_ascii=False, sort_keys=True)
+        if fingerprint in seen_sets:
+            err(f"{p}: повтор набора")
+        seen_sets.add(fingerprint)
+
+
+def publish_errors(case):
+    facts, owner = {}, {}
+    for agent in case.get("agents", []):
+        for fact in agent.get("facts", []):
+            facts[fact.get("id")] = fact
+            owner[fact.get("id")] = agent.get("id")
+    breakable = set()
+    for _ in range(len(facts) + 2):
+        grew = False
+        for fid, fact in facts.items():
+            if fid in breakable or fact.get("lie_type") not in ("must_lie", "can_lie"):
+                continue
+            if any(prior not in breakable for prior in (fact.get("requires_broken_lies") or [])):
+                continue
+            for raw_set in effective_sets(fact, case.get("contradictions", [])):
+                if set_collectable(raw_set, facts, breakable):
+                    breakable.add(fid)
+                    grew = True
+                    break
+        if not grew:
+            break
+    errors = []
+    for fid, fact in facts.items():
+        if fact.get("lie_type") != "must_lie" or fact.get("is_lie") is not True:
+            continue
+        sets = effective_sets(fact, case.get("contradictions", []))
+        if not sets:
+            errors.append(f"факт {fid}: «Всегда врёт» без наборов «Чем можно сломать»")
+        elif fid not in breakable:
+            errors.append(f"факт {fid}: ни один набор не собрать")
+    return errors
+
+
+def set_collectable(raw_set, facts, breakable):
+    if not isinstance(raw_set, list) or not raw_set:
+        return False
+    for item in raw_set:
+        if not isinstance(item, dict):
+            return False
+        kind = item.get("type")
+        if kind == "evidence_shown":
+            continue
+        if kind != "testimony_retold" or item.get("fact_id") not in facts:
+            return False
+        told = facts[item["fact_id"]]
+        if not told.get("is_lie") or told.get("lie_type") == "cannot_lie":
+            continue
+        if told.get("lie_type") == "can_lie" and item.get("form") != "truth_full":
+            continue
+        if item.get("fact_id") not in breakable:
+            return False
+    return True
+
+
 def eval_cond(cond, st):
     if cond is None:
         return True
@@ -269,6 +436,9 @@ def eval_cond(cond, st):
     if t == "lie_broken":
         return cond.get("fact_id") in st.get("broken", set())
     if t == "inconsistency_created":
+        cid = cond.get("contradiction_id") or ""
+        return bool(cid) and cid in st.get("contr", set())
+    if t == "testimony_retold":
         return False
     return False
 
@@ -288,6 +458,7 @@ def simulate(case, tone):
     st = {"p": {aid: min(100, a.get("starting_pressure", 0) + tone) for aid, a in agents.items()},
           "shown_any": set(), "contr": set(), "broken": broken}
     shown = set()   # (evidence, agent)
+    retold = set()  # (listener, fact, form)
     log = []
 
     def bump(aid, n, why):
@@ -327,12 +498,28 @@ def simulate(case, tone):
                     changed = True
         for fid, f in facts.items():
             aid = owner[fid]
+            if f.get("is_lie") and f.get("lie_type") == "can_lie" and fid not in broken:
+                for listener in agents:
+                    if listener != aid:
+                        retold.add((listener, fid, "basic"))
+            lv = level.get(fid)
+            forms = []
+            if lv in ("basic", "full"):
+                forms.append("basic")
+            if lv == "full":
+                forms.append("full")
+            for listener in agents:
+                if listener == aid:
+                    continue
+                for form in forms:
+                    retold.add((listener, fid, form))
+        for fid, f in facts.items():
+            aid = owner[fid]
             p = st["p"][aid]
             if f.get("is_lie") and fid not in broken:
-                bl = breaks_list(f)
                 prior = f.get("requires_broken_lies") or []
                 ready = all(item in broken for item in prior)
-                hit = ready and ("evidence" in bl and any((e, aid) in shown for e in f.get("related_evidence_ids", [])))
+                hit = ready and set_holds(case, f, aid, shown, retold, broken, owner, facts)
                 if hit:
                     broken.add(fid)
                     log.append(f"ложь сломана: {fid}")

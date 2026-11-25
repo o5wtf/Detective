@@ -3,7 +3,7 @@ extends RefCounted
 ## Синтаксис и вычисление unlock_condition (Д§15).
 
 
-static func evaluate(cond: Variant, state: GameState) -> bool:
+static func evaluate(cond: Variant, state: GameState, ctx: Dictionary = {}) -> bool:
 	if cond == null:
 		return true
 	if cond is not Dictionary:
@@ -11,12 +11,12 @@ static func evaluate(cond: Variant, state: GameState) -> bool:
 	var body := cond as Dictionary
 	if body.has("AND"):
 		for sub in body["AND"] as Array:
-			if not evaluate(sub, state):
+			if not evaluate(sub, state, ctx):
 				return false
 		return true
 	if body.has("OR"):
 		for sub in body["OR"] as Array:
-			if evaluate(sub, state):
+			if evaluate(sub, state, ctx):
 				return true
 		return false
 	var kind: Variant = body.get("type")
@@ -27,13 +27,20 @@ static func evaluate(cond: Variant, state: GameState) -> bool:
 		var shown_to: Array = state.shown.get(evidence_id, [])
 		if body.has("agent_id"):
 			return shown_to.has(str(body["agent_id"]))
+		if ctx.has("agent_id"):
+			return shown_to.has(str(ctx["agent_id"]))
 		return not shown_to.is_empty()
 	if kind == "evidence_mentioned":
 		return state.evidence_mentions.has(str(body.get("evidence_id", "")))
 	if kind == "lie_broken":
 		return state.broken_lies.has(str(body.get("fact_id", "")))
+	if kind == "testimony_retold":
+		return _retold(body, ctx)
 	if kind == "inconsistency_created":
-		return false
+		var contradiction_id := str(body.get("contradiction_id", ""))
+		if contradiction_id == "":
+			return false
+		return state.contradictions.has(contradiction_id)
 	return false
 
 
@@ -126,6 +133,24 @@ static func _check(
 			"cond_unknown_type",
 			"%s: неизвестный тип условия '%s'" % [where, _show(kind)]
 		))
+
+
+static func _retold(body: Dictionary, ctx: Dictionary) -> bool:
+	var fact_id := str(body.get("fact_id", ""))
+	var full_only := str(body.get("form", "")) == "truth_full"
+	var rows: Array = ctx.get("retold", [])
+	for row in rows:
+		if row is not Dictionary:
+			continue
+		if str((row as Dictionary).get("fact_id", "")) != fact_id:
+			continue
+		var form := str((row as Dictionary).get("form", ""))
+		if full_only:
+			if form == "full":
+				return true
+		elif form == "basic" or form == "full":
+			return true
+	return false
 
 
 static func _require_agent(body: Dictionary, where: String, agent_ids: Dictionary, errors: Array[Dictionary]) -> void:

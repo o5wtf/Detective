@@ -120,7 +120,24 @@ static func _fact(raw: Dictionary) -> CaseData.Fact:
 	fact.requires_evidence = raw.get("requires_evidence") == true
 	fact.requires_broken_lies = _strings(raw.get("requires_broken_lies"))
 	fact.breaks_lie_on = _breaks(raw.get("breaks_lie_on"))
+	fact.breaks_with_explicit = raw.has("breaks_with")
+	if fact.breaks_with_explicit:
+		fact.breaks_with = _break_sets(raw.get("breaks_with"))
 	return fact
+
+
+static func _break_sets(value: Variant) -> Array:
+	var sets: Array = []
+	if value is not Array:
+		return sets
+	for raw_set in value:
+		var items: Array = []
+		if raw_set is Array:
+			for item in raw_set:
+				if item is Dictionary:
+					items.append((item as Dictionary).duplicate(true))
+		sets.append(items)
+	return sets
 
 
 static func _evidence(raw: Dictionary) -> CaseData.EvidenceItem:

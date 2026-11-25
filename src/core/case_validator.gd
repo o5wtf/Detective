@@ -26,6 +26,49 @@ static func validate(raw: Dictionary) -> Array[Dictionary]:
 	return _inspect(raw)["errors"]
 
 
+## Ошибки публикации: «Всегда врёт» без наборов и набор, который нельзя собрать.
+## На загрузку дела в игру не влияют.
+static func publish_errors(raw: Dictionary) -> Array[Dictionary]:
+	var errors: Array[Dictionary] = []
+	var facts := {}
+	for agent in _as_array(raw.get("agents", [])):
+		if agent is not Dictionary:
+			continue
+		for fact in _as_array((agent as Dictionary).get("facts", [])):
+			if fact is Dictionary and not _falsy((fact as Dictionary).get("id")):
+				facts[(fact as Dictionary).get("id")] = fact
+	var breakable := {}
+	var guard := 0
+	while guard < facts.size() + 2:
+		guard += 1
+		var grew := false
+		for fact_id in facts:
+			if breakable.has(fact_id):
+				continue
+			var fact: Dictionary = facts[fact_id]
+			if fact.get("lie_type") != "must_lie" and fact.get("lie_type") != "can_lie":
+				continue
+			if not _priors_breakable(fact, breakable):
+				continue
+			for raw_set in _effective_sets(fact, _as_array(raw.get("contradictions", []))):
+				if _set_collectable(raw_set, facts, breakable):
+					breakable[fact_id] = true
+					grew = true
+					break
+		if not grew:
+			break
+	for fact_id in facts:
+		var fact: Dictionary = facts[fact_id]
+		if fact.get("lie_type") != "must_lie" or fact.get("is_lie") != true:
+			continue
+		var sets := _effective_sets(fact, _as_array(raw.get("contradictions", [])))
+		if sets.is_empty():
+			errors.append(error("breaks_with_required", "факт %s: «Всегда врёт» без наборов «Чем можно сломать»" % _show(fact_id)))
+		elif not breakable.has(fact_id):
+			errors.append(error("breaks_with_unreachable", "факт %s: ни один набор не собрать" % _show(fact_id)))
+	return errors
+
+
 static func warning_messages(raw: Dictionary) -> PackedStringArray:
 	return _inspect(raw)["warnings"]
 
@@ -43,6 +86,7 @@ static func _inspect(raw: Dictionary) -> Dictionary:
 	var evidence_ids := _unique_ids(evidence, "улики", errors)
 	var contradiction_ids := _unique_ids(contradictions, "противоречия", errors)
 	var facts := {}
+	var fact_owner := {}
 	for agent in agents:
 		if agent is not Dictionary:
 			continue
@@ -58,6 +102,7 @@ static func _inspect(raw: Dictionary) -> Dictionary:
 			if facts.has(fact_id):
 				errors.append(error("fact_id_duplicate", "повторяющийся id факта: %s" % _show(fact_id)))
 			facts[fact_id] = fact_body
+			fact_owner[fact_id] = agent_body.get("id")
 	if not agent_ids.has(raw.get("killer_id")):
 		errors.append(error(
 			"killer_missing",
@@ -98,7 +143,7 @@ static func _inspect(raw: Dictionary) -> Dictionary:
 			if contradiction_body.get("fact_%s_form" % side) == "lie":
 				lie_facts[contradiction_body.get("fact_%s_id" % side)] = true
 	for fact_id in facts:
-		_validate_fact(str(fact_id), facts[fact_id], facts, evidence_ids, lie_facts, errors)
+		_validate_fact(str(fact_id), facts[fact_id], facts, evidence_ids, lie_facts, fact_owner, errors)
 	for contradiction_id in contradiction_ids:
 		_validate_contradiction(contradiction_id, contradiction_ids[contradiction_id], facts, errors)
 	for evidence_id in evidence_ids:
@@ -168,6 +213,7 @@ static func _validate_fact(
 	facts: Dictionary,
 	evidence_ids: Dictionary,
 	lie_facts: Dictionary,
+	fact_owner: Dictionary,
 	errors: Array[Dictionary]
 ) -> void:
 	var where := "факт %s" % fact_id
@@ -239,24 +285,149 @@ static func _validate_fact(
 			errors.append(error("cannot_lie_flag", "%s: cannot_lie, но is_lie=true" % where))
 		if not _falsy(fact.get("lie_text")):
 			errors.append(error("lie_text_forbidden", "%s: cannot_lie, но lie_text заполнен" % where))
+	var has_sets := fact.has("breaks_with")
 	if _falsy(is_lie) and not breaks.is_empty():
 		errors.append(error("breaks_lie_on_unexpected", "%s: у факта без лжи задан breaks_lie_on" % where))
-	if breaks.has("evidence") and related.is_empty():
+	if not has_sets and breaks.has("evidence") and related.is_empty():
 		errors.append(error(
 			"breaks_lie_evidence_unlinked",
 			"%s: breaks_lie_on=evidence, но нет related_evidence_ids" % where
 		))
-	if breaks.has("contradiction") and not lie_facts.has(fact_id):
+	if not has_sets and breaks.has("contradiction") and not lie_facts.has(fact_id):
 		errors.append(error(
 			"breaks_lie_no_contradiction",
 			"%s: breaks_lie_on=contradiction, но нет противоречия с этим фактом в форме lie" % where
 		))
+	if has_sets:
+		_validate_break_sets(fact_id, fact, facts, evidence_ids, fact_owner, errors)
 	for prior_id in _as_array(fact.get("requires_broken_lies", [])):
 		if not facts.has(prior_id):
 			errors.append(error(
 				"requires_broken_unknown",
 			"%s: requires_broken_lies ссылается на неизвестный факт %s" % [where, _show(prior_id)]
 		))
+
+
+static func _validate_break_sets(
+	fact_id: String,
+	fact: Dictionary,
+	facts: Dictionary,
+	evidence_ids: Dictionary,
+	fact_owner: Dictionary,
+	errors: Array[Dictionary]
+) -> void:
+	var where := "факт %s" % fact_id
+	var value: Variant = fact.get("breaks_with")
+	if value is not Array:
+		errors.append(error("breaks_with_not_list", "%s: breaks_with не список наборов" % where))
+		return
+	if _falsy(fact.get("is_lie")) and not (value as Array).is_empty():
+		errors.append(error("breaks_with_unexpected", "%s: у факта без лжи задан breaks_with" % where))
+	var seen_sets := {}
+	for raw_set in value:
+		if raw_set is not Array or (raw_set as Array).is_empty():
+			errors.append(error("breaks_with_empty", "%s: пустой набор" % where))
+			continue
+		var seen_items := {}
+		for item in raw_set:
+			if item is not Dictionary or (item as Dictionary).has("AND") or (item as Dictionary).has("OR"):
+				errors.append(error("breaks_with_nested", "%s: в наборе недопустима группа И/ИЛИ" % where))
+				continue
+			var body := item as Dictionary
+			var kind := str(body.get("type", ""))
+			if body.has("agent_id"):
+				errors.append(error("breaks_with_agent", "%s: в пункте набора не пишется agent_id" % where))
+			if kind == "evidence_shown":
+				var evidence_id: Variant = body.get("evidence_id")
+				if not evidence_ids.has(evidence_id):
+					errors.append(error("breaks_with_unknown_evidence", "%s: улика %s не найдена" % [where, _show(evidence_id)]))
+				var mark := "e:%s" % _show(evidence_id)
+				if seen_items.has(mark):
+					errors.append(error("breaks_with_repeat", "%s: повтор пункта %s" % [where, _show(evidence_id)]))
+				seen_items[mark] = true
+			elif kind == "testimony_retold":
+				var told: Variant = body.get("fact_id")
+				if not facts.has(told):
+					errors.append(error("breaks_with_unknown_fact", "%s: показание %s не найдено" % [where, _show(told)]))
+				elif str(fact_owner.get(told, "")) == str(fact_owner.get(fact_id, "")):
+					errors.append(error("breaks_with_self", "%s: breaks_with пересказывает своё показание %s" % [where, _show(told)]))
+				var form := str(body.get("form", ""))
+				if form != "" and form != "truth_full":
+					errors.append(error("breaks_with_form", "%s: форма пересказа '%s' недопустима" % [where, form]))
+				var mark := "t:%s:%s" % [_show(told), form]
+				if seen_items.has(mark):
+					errors.append(error("breaks_with_repeat", "%s: повтор пересказа %s" % [where, _show(told)]))
+				seen_items[mark] = true
+			else:
+				errors.append(error("breaks_with_unknown", "%s: неизвестный вид пункта '%s'" % [where, kind]))
+		var fingerprint := JSON.stringify(raw_set)
+		if seen_sets.has(fingerprint):
+			errors.append(error("breaks_with_repeat", "%s: повтор набора" % where))
+		seen_sets[fingerprint] = true
+
+
+static func _effective_sets(fact: Dictionary, contradictions: Array) -> Array:
+	if fact.has("breaks_with") and fact.get("breaks_with") is Array:
+		return fact.get("breaks_with")
+	var sets: Array = []
+	var modes := {}
+	var raw_modes: Variant = fact.get("breaks_lie_on")
+	if raw_modes is String:
+		modes[raw_modes] = true
+	elif raw_modes is Array:
+		for item in raw_modes:
+			modes[str(item)] = true
+	if modes.has("evidence"):
+		for evidence_id in _as_array(fact.get("related_evidence_ids", [])):
+			sets.append([{"type": "evidence_shown", "evidence_id": evidence_id}])
+	if modes.has("contradiction"):
+		for contradiction in contradictions:
+			if contradiction is not Dictionary:
+				continue
+			var body := contradiction as Dictionary
+			var partner := {}
+			if body.get("fact_a_id") == fact.get("id") and body.get("fact_a_form") == "lie":
+				partner = {"fact_id": body.get("fact_b_id"), "form": body.get("fact_b_form")}
+			elif body.get("fact_b_id") == fact.get("id") and body.get("fact_b_form") == "lie":
+				partner = {"fact_id": body.get("fact_a_id"), "form": body.get("fact_a_form")}
+			var form := str(partner.get("form", ""))
+			if form != "truth" and form != "truth_full":
+				continue
+			var item := {"type": "testimony_retold", "fact_id": partner.get("fact_id")}
+			if form == "truth_full":
+				item["form"] = "truth_full"
+			sets.append([item])
+	return sets
+
+
+static func _priors_breakable(fact: Dictionary, breakable: Dictionary) -> bool:
+	for prior in _as_array(fact.get("requires_broken_lies", [])):
+		if not breakable.has(prior):
+			return false
+	return true
+
+
+static func _set_collectable(raw_set: Variant, facts: Dictionary, breakable: Dictionary) -> bool:
+	if raw_set is not Array or (raw_set as Array).is_empty():
+		return false
+	for item in raw_set:
+		if item is not Dictionary:
+			return false
+		var body := item as Dictionary
+		var kind := str(body.get("type", ""))
+		if kind == "evidence_shown":
+			continue
+		if kind != "testimony_retold" or not facts.has(body.get("fact_id")):
+			return false
+		var told: Dictionary = facts[body.get("fact_id")]
+		var lie: Variant = told.get("lie_type")
+		if lie == "cannot_lie" or not told.get("is_lie"):
+			continue
+		if lie == "can_lie" and str(body.get("form", "")) != "truth_full":
+			continue
+		if not breakable.has(body.get("fact_id")):
+			return false
+	return true
 
 
 static func _validate_contradiction(

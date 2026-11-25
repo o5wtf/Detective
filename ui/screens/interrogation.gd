@@ -35,6 +35,8 @@ var _error: Label
 var _retry: Button
 var _busy: bool = false
 var _hint_id: String = ""
+var _confront_statement: String = ""
+var _confront_evidence: String = ""
 var _dismissed: String = ""
 var _last: Dictionary = {}
 var _feeds: Dictionary = {}
@@ -364,14 +366,27 @@ func _send() -> void:
 	if _prompt == null:
 		return
 	var text := _prompt.text.strip_edges()
-	if text == "" or _busy or (_talk != null and _talk.locked):
+	if _busy or (_talk != null and _talk.locked):
+		return
+	if text == "" and _confront_statement == "":
 		return
 	_prompt.text = ""
 	await _send_text(text)
 
 
+func begin_confront(statement_id: String, evidence_id: String) -> void:
+	_confront_statement = statement_id
+	_confront_evidence = evidence_id
+	var title := _evidence_title(evidence_id)
+	_hint_label.text = "Предъявить «%s»? Можно добавить фразу в поле." % title
+	_hint.visible = true
+
+
 func _send_text(text: String) -> void:
 	if _busy or agent_id == "":
+		return
+	if _confront_statement != "":
+		await _send_confront(text)
 		return
 	var spoken := text.strip_edges()
 	if spoken == "":
@@ -581,6 +596,62 @@ func _on_mic_level(unit: float) -> void:
 	_meter.push(unit)
 
 
+func _send_confront(text: String) -> void:
+	var statement_id := _confront_statement
+	var evidence_id := _confront_evidence
+	_confront_statement = ""
+	_confront_evidence = ""
+	_hide_hint()
+	_clear_error()
+	_voice_gate = true
+	_heard_speech = false
+	_apply_voice_gate()
+	_last = {
+		"kind": "confront",
+		"text": text.strip_edges(),
+		"statement_id": statement_id,
+		"evidence_id": evidence_id,
+		"agent_id": agent_id,
+	}
+	var quote := _statement_quote(statement_id)
+	var title := _evidence_title(evidence_id)
+	_push({"kind": "player", "text": UiStrings.confront_line(title, quote)})
+	await Game.confront(agent_id, statement_id, evidence_id, text)
+	_push_verdict(agent_id, statement_id, evidence_id)
+	_release_voice_gate()
+
+
+func _push_verdict(who: String, statement_id: String, evidence_id: String) -> void:
+	if Game.state == null:
+		return
+	for item in Game.state.confrontations:
+		if str(item.get("agent_id", "")) != who:
+			continue
+		if str(item.get("statement_id", "")) != statement_id or str(item.get("evidence_id", "")) != evidence_id:
+			continue
+		var label := UiStrings.player_verdict(str(item.get("verdict", "")))
+		var line := label
+		var also: Variant = item.get("also_broken", [])
+		if also is Array and not (also as Array).is_empty():
+			var names: PackedStringArray = PackedStringArray()
+			for fact_id in also:
+				var fact: CaseData.Fact = Game.case_data.fact_by_id.get(str(fact_id)) as CaseData.Fact
+				names.append(fact.lie_text if fact != null and fact.lie_text != "" else str(fact_id))
+			line = "%s. %s" % [label, UiStrings.also_broken(", ".join(names))]
+		_push_to(who, {"kind": "system", "text": line})
+		return
+
+
+func _statement_quote(statement_id: String) -> String:
+	var parts := statement_id.split("|")
+	var fact_id := parts[0] if not parts.is_empty() else statement_id
+	var form := parts[1] if parts.size() > 1 else "basic"
+	var fact: CaseData.Fact = null
+	if Game.case_data != null:
+		fact = Game.case_data.fact_by_id.get(fact_id) as CaseData.Fact
+	return Notebook.text_for(fact, form)
+
+
 func _confirm_from_board(evidence_id: String) -> void:
 	if _busy or agent_id == "":
 		return
@@ -595,6 +666,11 @@ func _confirm_from_board(evidence_id: String) -> void:
 
 
 func _confirm_hint() -> void:
+	if _confront_statement != "":
+		var extra := _prompt.text.strip_edges()
+		_prompt.text = ""
+		await _send_confront(extra)
+		return
 	if _busy or _hint_id == "" or agent_id == "":
 		return
 	var text := _prompt.text.strip_edges()
@@ -615,7 +691,9 @@ func _retry_last() -> void:
 	var who := str(_last.get("agent_id", agent_id))
 	if who == "":
 		who = agent_id
-	if str(_last.get("kind", "")) == "present":
+	if str(_last.get("kind", "")) == "confront":
+		await Game.confront(who, str(_last.get("statement_id", "")), str(_last.get("evidence_id", "")), str(_last.get("text", "")))
+	elif str(_last.get("kind", "")) == "present":
 		await Game.present(who, str(_last.get("evidence_id", "")), str(_last.get("text", "")))
 	else:
 		_push_to(who, {"kind": "player", "text": str(_last.get("text", ""))})

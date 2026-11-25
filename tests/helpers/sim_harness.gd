@@ -24,6 +24,7 @@ static func run(case_data: CaseData, tone: int) -> Dictionary:
 				continue
 			for agent in case_data.agents:
 				engine.present_quiet(agent.id, evidence.id)
+		engine.assume_simulation_retells()
 		engine.pass_facts()
 		engine.record_simulation_statements()
 		engine.pass_contradictions()

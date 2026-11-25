@@ -45,15 +45,10 @@ func commit_plan(agent_id: String, plan: Dictionary) -> Array:
 		var name := str(evidence_id)
 		if name != "" and not state.evidence_mentions.has(name):
 			state.evidence_mentions.append(name)
-	for lie_id in plan.get("break_lies", []):
-		var name := str(lie_id)
-		if name == "" or state.broken_lies.has(name):
-			continue
-		var fact: CaseData.Fact = case_data.fact_by_id.get(name) as CaseData.Fact
-		if fact == null or not _required_lies_broken(fact):
-			continue
-		state.broken_lies.append(name)
-		events.append({"type": "lie_broken", "fact_id": name, "agent_id": agent_id})
+	for key in plan.get("retold", []):
+		var name := str(key)
+		if name != "" and not state.retold.has(name):
+			state.retold.append(name)
 	for evidence_id in plan.get("present", []):
 		_present(agent_id, str(evidence_id), events)
 	events.append_array(_resolve())
@@ -75,6 +70,37 @@ func register_statements(agent_id: String, statements: Array) -> Array:
 			})
 	events.append_array(_resolve())
 	return events
+
+
+func confront(agent_id: String, statement_id: String, evidence_id: String) -> Dictionary:
+	var fact_id := statement_id
+	var form := ""
+	var parts := statement_id.split("|")
+	if parts.size() >= 2:
+		fact_id = parts[0]
+		form = parts[1]
+	var fact: CaseData.Fact = case_data.fact_by_id.get(fact_id) as CaseData.Fact
+	if _confront_repeat(agent_id, fact_id, evidence_id):
+		return _store_confront(agent_id, statement_id, evidence_id, "repeat", [])
+	var broken_before := {}
+	for lie_id in state.broken_lies:
+		broken_before[lie_id] = true
+	var level_before := str(state.fact_levels.get(fact_id, "closed"))
+	var was_broken := state.broken_lies.has(fact_id)
+	if state.unlocked_evidence.has(evidence_id) and not _shown_to(evidence_id, agent_id):
+		var ignored: Array = []
+		_present(agent_id, evidence_id, ignored)
+	_resolve()
+	var also: Array[String] = []
+	for lie_id in state.broken_lies:
+		if broken_before.has(lie_id) or lie_id == fact_id:
+			continue
+		if str(case_data.fact_owner.get(lie_id, "")) == agent_id:
+			also.append(lie_id)
+	var verdict := _verdict(fact, evidence_id, was_broken, level_before)
+	var stored := _store_confront(agent_id, statement_id, evidence_id, verdict, also)
+	stored["form"] = form
+	return stored
 
 
 func present_evidence(agent_id: String, evidence_id: String) -> Array:
@@ -173,9 +199,12 @@ func simulation_signature() -> String:
 	broken.sort()
 	var contras := state.contradictions.duplicate()
 	contras.sort()
-	return "%s#%s#%s#%s#%s#%s#%s" % [
+	var retold := state.retold.duplicate()
+	retold.sort()
+	return "%s#%s#%s#%s#%s#%s#%s#%s" % [
 		"|".join(pressures), "|".join(levels), "|".join(unlocked),
 		"|".join(broken), "|".join(contras), "|".join(shown_pairs), "|".join(heard_keys),
+		"|".join(retold),
 	]
 
 
@@ -268,16 +297,30 @@ func _present(agent_id: String, evidence_id: String, events: Array) -> bool:
 	return true
 
 
+func assume_simulation_retells() -> void:
+	for agent in case_data.agents:
+		for other in case_data.agents:
+			for fact in other.facts:
+				if other.id == agent.id:
+					continue
+				var forms: PackedStringArray = PackedStringArray()
+				if fact.is_lie and fact.lie_type == "can_lie" and not state.broken_lies.has(fact.id):
+					forms.append("basic")
+				var level := str(state.fact_levels.get(fact.id, "closed"))
+				if (level == "basic" or level == "full") and not forms.has("basic"):
+					forms.append("basic")
+				if level == "full":
+					forms.append("full")
+				for form in forms:
+					var key := BreakSets.retell_key(agent.id, fact.id, form)
+					if not state.retold.has(key):
+						state.retold.append(key)
+
+
 func _lie_breaks(fact: CaseData.Fact) -> bool:
-	if not _required_lies_broken(fact):
+	if not fact.is_lie or not _required_lies_broken(fact):
 		return false
-	var breaks := _breaks_of(fact)
-	var agent_id := str(case_data.fact_owner[fact.id])
-	if breaks.has("evidence"):
-		for evidence_id in fact.related_evidence_ids:
-			if _shown_to(evidence_id, agent_id):
-				return true
-	return false
+	return BreakSets.holds(case_data, state, fact)
 
 
 func _desired_level(fact: CaseData.Fact) -> String:
@@ -317,18 +360,18 @@ func _packet_entry(fact: CaseData.Fact) -> Dictionary:
 	var broken := state.broken_lies.has(fact.id)
 	if fact.is_lie and not broken:
 		if fact.lie_type == "can_lie" and _basic_threshold_met(fact):
-			return {
+			return _with_doubt(fact, {
 				"fact_id": fact.id,
 				"mode": "lie_or_basic",
 				"lie_text": fact.lie_text,
 				"content": fact.content_basic,
-			}
-		return {
+			})
+		return _with_doubt(fact, {
 			"fact_id": fact.id,
 			"mode": "lie",
 			"lie_text": fact.lie_text,
 			"content": fact.lie_text,
-		}
+		})
 	var level := str(state.fact_levels.get(fact.id, "closed"))
 	if level == "full":
 		return {"fact_id": fact.id, "mode": "full", "lie_text": "", "content": fact.content_full}
@@ -427,6 +470,60 @@ func _breaks_of(fact: CaseData.Fact) -> Array:
 	if value is Array:
 		return value
 	return []
+
+
+func _with_doubt(fact: CaseData.Fact, entry: Dictionary) -> Dictionary:
+	var report := BreakSets.doubt_report(case_data, state, fact)
+	if bool(report.get("active", false)):
+		entry["doubt"] = str(report.get("line", ""))
+	return entry
+
+
+func _confront_repeat(agent_id: String, fact_id: String, evidence_id: String) -> bool:
+	for item in state.confrontations:
+		if str(item.get("agent_id", "")) != agent_id or str(item.get("evidence_id", "")) != evidence_id:
+			continue
+		if str(item.get("verdict", "")) == "repeat":
+			continue
+		var statement := str(item.get("statement_id", ""))
+		var pieces := statement.split("|")
+		var previous := statement
+		if pieces.size() > 0:
+			previous = pieces[0]
+		if previous == fact_id:
+			return true
+	return false
+
+
+func _verdict(fact: CaseData.Fact, evidence_id: String, was_broken: bool, level_before: String) -> String:
+	if fact == null or not fact.is_lie:
+		return "not_refuted"
+	var broken_now := state.broken_lies.has(fact.id)
+	if broken_now and not was_broken:
+		return "refuted"
+	if not was_broken:
+		if BreakSets.evidence_completes(case_data, state, fact, evidence_id) and not _required_lies_broken(fact):
+			return "holds"
+		if BreakSets.evidence_in_set(case_data, fact, evidence_id):
+			return "doubt"
+		return "not_refuted"
+	var level_now := str(state.fact_levels.get(fact.id, "closed"))
+	if fact.requires_evidence and fact.related_evidence_ids.has(evidence_id) and level_before != "full" and level_now == "full":
+		return "completed"
+	return "already"
+
+
+func _store_confront(agent_id: String, statement_id: String, evidence_id: String, verdict: String, also: Array[String]) -> Dictionary:
+	var row := {
+		"turn": state.turn + 1,
+		"agent_id": agent_id,
+		"statement_id": statement_id,
+		"evidence_id": evidence_id,
+		"verdict": verdict,
+		"also_broken": also,
+	}
+	state.confrontations.append(row)
+	return row
 
 
 func _rank(level: String) -> int:

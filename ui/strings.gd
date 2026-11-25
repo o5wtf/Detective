@@ -16,6 +16,14 @@ const EVIDENCE := "Улики"
 const NOTEBOOK := "Блокнот"
 const NOTES_TAB := "Записи"
 const CONTRADICTIONS_TAB := "Противоречия"
+const PRESENTATIONS_TAB := "Предъявления"
+const CONFRONT := "Предъявить улику"
+const EXPOSED := "✓ разоблачено"
+const VERDICT_REPEAT := "Уже предъявляли"
+const VERDICT_REFUTED := "Опровергнуто"
+const VERDICT_HOLD := "Не опровергает"
+const VERDICT_COMPLETED := "Полное признание"
+const VERDICT_ALREADY := "Уже признано"
 const YES := "Да"
 const DISMISS := "×"
 const RETRY := "Повторить"
@@ -202,6 +210,28 @@ static func present_hint(title: String) -> String:
 
 static func presented_line(title: String) -> String:
 	return "[предъявлена улика: %s]" % title
+
+
+static func confront_line(title: String, quote: String) -> String:
+	return "предъявили «%s» против слов «%s»" % [title, quote]
+
+
+static func player_verdict(verdict: String) -> String:
+	match verdict:
+		"repeat":
+			return VERDICT_REPEAT
+		"refuted":
+			return VERDICT_REFUTED
+		"completed":
+			return VERDICT_COMPLETED
+		"already":
+			return VERDICT_ALREADY
+		_:
+			return VERDICT_HOLD
+
+
+static func also_broken(names: String) -> String:
+	return "разоблачено также: %s" % names
 
 
 static func evidence_opened(title: String) -> String:

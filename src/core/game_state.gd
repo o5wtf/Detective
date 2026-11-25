@@ -16,6 +16,10 @@ var contradiction_turns: Dictionary = {}
 var evidence_mentions: Array[String] = []
 ## Сколько раз персонаж уже касался темы закрытой улики. Старые сохранения поля не имеют.
 var topic_touches: Dictionary = {}
+## Пересказы: «лжец|факт|basic|full». Старые сохранения поля не имеют.
+var retold: Array[String] = []
+## Предъявления против показания. Старые сохранения поля не имеют.
+var confrontations: Array[Dictionary] = []
 var talked_to: Array[String] = []
 var accusation: Dictionary = {
 	"killer_ok": false,
@@ -42,6 +46,8 @@ func to_dict() -> Dictionary:
 		"contradiction_turns": contradiction_turns.duplicate(true),
 		"evidence_mentions": evidence_mentions.duplicate(),
 		"topic_touches": topic_touches.duplicate(true),
+		"retold": retold.duplicate(),
+		"confrontations": confrontations.duplicate(true),
 		"talked_to": talked_to.duplicate(),
 		"accusation": accusation.duplicate(true),
 		"dialogues": dialogues.duplicate(true),
@@ -64,6 +70,8 @@ static func from_dict(data: Dictionary) -> GameState:
 	state.contradiction_turns = _int_map(data.get("contradiction_turns", {}))
 	state.evidence_mentions = _string_list(data.get("evidence_mentions", []))
 	state.topic_touches = _int_map(data.get("topic_touches", {}))
+	state.retold = _string_list(data.get("retold", []))
+	state.confrontations = _confrontation_list(data.get("confrontations", []))
 	state.talked_to = _string_list(data.get("talked_to", []))
 	state.accusation = _accusation(data.get("accusation", {}))
 	state.dialogues = (data.get("dialogues", {}) as Dictionary).duplicate(true)
@@ -118,6 +126,30 @@ static func _heard_list(value: Variant) -> Array[Dictionary]:
 				"form": str(body.get("form", "")),
 				"turn": int(body.get("turn", 0)),
 			})
+	return result
+
+
+static func _confrontation_list(value: Variant) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	if value is not Array:
+		return result
+	for item in value:
+		if item is not Dictionary:
+			continue
+		var body := item as Dictionary
+		var also: Array[String] = []
+		var raw_also: Variant = body.get("also_broken", [])
+		if raw_also is Array:
+			for fact_id in raw_also:
+				also.append(str(fact_id))
+		result.append({
+			"turn": int(body.get("turn", 0)),
+			"agent_id": str(body.get("agent_id", "")),
+			"statement_id": str(body.get("statement_id", "")),
+			"evidence_id": str(body.get("evidence_id", "")),
+			"verdict": str(body.get("verdict", "")),
+			"also_broken": also,
+		})
 	return result
 
 

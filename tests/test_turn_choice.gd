@@ -63,6 +63,7 @@ func test_citation_accepts_only_a_heard_pair() -> void:
 	lie.lie_type = "must_lie"
 	lie.lie_text = "Меня там не было."
 	lie.content_full = "Я был после закрытия."
+	lie.breaks_lie_on = "contradiction"
 	_fact(data, "b", "fb")
 	var contradiction := CaseData.Contradiction.new()
 	contradiction.id = "c"

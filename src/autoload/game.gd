@@ -70,6 +70,15 @@ func ask(agent_id: String, player_text: String) -> void:
 	await _turn(agent_id, player_text, "", "")
 
 
+func confront(agent_id: String, statement_id: String, evidence_id: String, player_text: String = "") -> void:
+	if is_busy:
+		return
+	var question := player_text.strip_edges()
+	if question == "":
+		question = "Что скажете?"
+	await _turn(agent_id, question, "", evidence_id, statement_id)
+
+
 func present(agent_id: String, evidence_id: String, player_text: String = "") -> void:
 	if is_busy:
 		return
@@ -125,7 +134,7 @@ func add_greeting(agent_id: String) -> String:
 	return text
 
 
-func _turn(agent_id: String, player_text: String, event_note: String, evidence_id: String) -> void:
+func _turn(agent_id: String, player_text: String, event_note: String, evidence_id: String, statement_id: String = "") -> void:
 	if is_busy:
 		return
 	if _engine == null or not _dialogues.has(agent_id):
@@ -145,7 +154,21 @@ func _turn(agent_id: String, player_text: String, event_note: String, evidence_i
 	var snapshot := state.to_dict()
 	_turn_snapshot = snapshot
 	var turn_events: Array = []
-	if evidence_id != "":
+	if statement_id != "":
+		var outcome := _engine.confront(agent_id, statement_id, evidence_id)
+		var quote := _statement_text(statement_id)
+		var title := evidence_id
+		if case_data.evidence_by_id.has(evidence_id):
+			title = (case_data.evidence_by_id[evidence_id] as CaseData.EvidenceItem).title
+		event_note = BreakSets.event_note(title, quote, str(outcome.get("verdict", "")))
+		var also: Array = outcome.get("also_broken", [])
+		if not also.is_empty():
+			var names: PackedStringArray = PackedStringArray()
+			for fact_id in also:
+				var fact: CaseData.Fact = case_data.fact_by_id.get(str(fact_id)) as CaseData.Fact
+				names.append(fact.lie_text if fact != null and fact.lie_text != "" else str(fact_id))
+			event_note += " Разоблачено также: %s." % ", ".join(names)
+	elif evidence_id != "":
 		turn_events.append_array(_engine.present_evidence(agent_id, evidence_id))
 	turn_events.append_array(_engine.note_question(agent_id))
 	var dialogue: DialogueState = _dialogues[agent_id]
@@ -284,6 +307,18 @@ func _read_choice(result: Dictionary) -> TurnChoice:
 		index += 24
 	reader.finish()
 	return reader
+
+
+func _statement_text(statement_id: String) -> String:
+	var parts := statement_id.split("|")
+	var fact_id := statement_id
+	var form := "basic"
+	if parts.size() > 0:
+		fact_id = parts[0]
+	if parts.size() > 1:
+		form = parts[1]
+	var fact: CaseData.Fact = case_data.fact_by_id.get(fact_id) as CaseData.Fact
+	return Notebook.text_for(fact, form)
 
 
 func _admit_note(plan: Dictionary) -> String:
@@ -510,6 +545,8 @@ func _restore(snapshot: Dictionary) -> void:
 	state.contradiction_turns = fresh.contradiction_turns
 	state.evidence_mentions = fresh.evidence_mentions
 	state.topic_touches = fresh.topic_touches
+	state.retold = fresh.retold
+	state.confrontations = fresh.confrontations
 	state.talked_to = fresh.talked_to
 	state.accusation = fresh.accusation
 	state.dialogues = fresh.dialogues
