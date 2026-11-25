@@ -8,12 +8,20 @@ const DIRECTORY := "res://assets/voice/fillers"
 
 static var delay_ms := -1
 static var last_line := ""
+## Если >= 0, междометие считает время по этим миллисекундам, а не по кадрам.
+static var clock_ms := -1
 
 
 static func delay() -> int:
 	if delay_ms >= 0:
 		return delay_ms
 	return FILLER_DELAY_MS
+
+
+static func now_ms() -> int:
+	if clock_ms >= 0:
+		return clock_ms
+	return Time.get_ticks_msec()
 
 
 static func standard_lines() -> PackedStringArray:

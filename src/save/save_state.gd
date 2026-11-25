@@ -112,12 +112,20 @@ static func _safe(case_id: String) -> String:
 	return out
 
 
+static func without_secrets(value: Variant) -> Variant:
+	return _without_secrets(value)
+
+
+static func _secret_key(name: String) -> bool:
+	return name == "api_key" or name == "gemini_api_key" or name == "chirp_key" or name == "private_key" or name == "key" or name == "token" or name == "secret"
+
+
 static func _without_secrets(value: Variant) -> Variant:
 	if value is Dictionary:
 		var copy := {}
 		for key in value:
 			var name := str(key)
-			if name == "api_key" or name == "gemini_api_key" or name == "chirp_key" or name == "private_key":
+			if _secret_key(name):
 				continue
 			copy[key] = _without_secrets(value[key])
 		return copy
@@ -126,4 +134,15 @@ static func _without_secrets(value: Variant) -> Variant:
 		for item in value:
 			items.append(_without_secrets(item))
 		return items
+	if value is String:
+		return _scrub_secret_text(value)
 	return value
+
+
+static func _scrub_secret_text(text: String) -> String:
+	var store := SettingsStore.load_current()
+	if store.api_key.length() >= 8 and text == store.api_key:
+		return ""
+	if store.chirp_key.length() >= 8 and text == store.chirp_key:
+		return ""
+	return text

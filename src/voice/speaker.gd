@@ -193,12 +193,12 @@ func stop_filler() -> void:
 
 
 func _run_filler(agent_id: String, token: int) -> void:
-	var armed_ms := Time.get_ticks_msec()
+	var armed_ms := FillerBank.now_ms()
 	var wait := FillerBank.delay()
 	if wait <= 0:
-		await get_tree().process_frame
-	while token == _filler_token and Time.get_ticks_msec() - armed_ms < wait:
-		await get_tree().process_frame
+		await _wait_frame()
+	while token == _filler_token and FillerBank.now_ms() - armed_ms < wait:
+		await _wait_frame()
 	if token != _filler_token:
 		return
 	_filler_waiting = false
@@ -207,6 +207,15 @@ func _run_filler(agent_id: String, token: int) -> void:
 	if queue.current_id != "" or not queue.pending.is_empty():
 		return
 	await _play_filler(agent_id, token)
+
+
+func _wait_frame() -> void:
+	var tree := get_tree()
+	if tree == null:
+		tree = Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return
+	await tree.process_frame
 
 
 func _play_filler(agent_id: String, token: int) -> void:
