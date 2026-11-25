@@ -19,7 +19,6 @@ const EXPECTED_CODE := {
 	"broken_contradiction_break_without_pair.json": "breaks_lie_no_contradiction",
 	"broken_emotion.json": "emotion_unknown",
 	"broken_no_prompt_background.json": "agent_field_missing",
-	"broken_key_evidence_no_facts.json": "key_evidence_no_facts",
 }
 
 
@@ -177,6 +176,88 @@ func test_more_rules_and_warnings() -> void:
 	var warnings := CaseValidator.warning_messages(one_way)
 	assert_eq(warnings.size(), 1)
 	assert_true(warnings[0].contains("не ссылается"), warnings[0])
+
+
+func test_parse_matches_load_and_keeps_hidden_keys() -> void:
+	var raw := _read_json(REAL_CASE)
+	var loaded := CaseLoader.load_case(REAL_CASE)
+	var parsed := CaseLoader.parse(raw)
+	assert_true(parsed.ok)
+	assert_eq(parsed.case_data.id, loaded.case_data.id)
+	assert_eq(parsed.case_data.agents.size(), loaded.case_data.agents.size())
+	assert_eq(parsed.case_data.fact_by_id.size(), loaded.case_data.fact_by_id.size())
+	var saved := CaseLoader.save_document(raw)
+	assert_eq(CaseValidator.validate(saved).size(), 0)
+	for key in ["background", "is_key", "starting_pressure", "tags", "breaks_with", "breaks_lie_on", "editor"]:
+		assert_eq(_key_count(saved, key), _key_count(raw, key), key)
+	assert_true(_key_count(raw, "background") > 0)
+	assert_true(_key_count(raw, "breaks_with") > 0)
+	assert_true(_key_count(raw, "is_key") > 0)
+
+
+func test_background_and_unlinked_key_evidence_load() -> void:
+	var minimal: Dictionary = _read_json("%s/valid_minimal.json" % FIXTURES)
+	minimal["agents"][0].erase("background")
+	assert_eq(CaseValidator.validate(minimal).size(), 0)
+	assert_true(CaseLoader.parse(minimal).ok)
+	var unlinked := CaseLoader.load_case("%s/valid_unlinked_key.json" % FIXTURES)
+	assert_true(unlinked.ok, str(unlinked.errors))
+	assert_true(unlinked.case_data.evidence[0].is_key)
+
+
+func test_filler_lines_and_profanity_survive_the_round_trip() -> void:
+	var raw: Dictionary = _read_json("%s/valid_minimal.json" % FIXTURES).duplicate(true)
+	raw["agents"][0]["filler_lines"] = ["Раз", "Два", "Три", "Лишняя"]
+	raw["agents"][0]["profanity"] = "sometimes"
+	raw["secret_note"] = "не для движка"
+	var saved := CaseLoader.save_document(raw)
+	assert_eq(str(saved.get("secret_note", "")), "не для движка")
+	assert_eq((saved["agents"][0]["filler_lines"] as Array).size(), 4)
+	var loaded := CaseLoader.parse(saved)
+	assert_true(loaded.ok)
+	var agent: CaseData.Agent = loaded.case_data.agents[0]
+	assert_eq(agent.filler_lines.size(), 3)
+	assert_eq(agent.filler_lines[0], "Раз")
+	assert_eq(agent.filler_lines[2], "Три")
+	assert_eq(FillerBank.lines_for(agent)[0], "Раз")
+	assert_eq(agent.profanity, "sometimes")
+	for value in ["never", "sometimes", "often"]:
+		var again: Dictionary = saved.duplicate(true)
+		again["agents"][0]["profanity"] = value
+		var back := CaseLoader.parse(CaseLoader.save_document(again))
+		assert_true(back.ok, value)
+		assert_eq(back.case_data.agents[0].profanity, value)
+	var cleared: Dictionary = saved.duplicate(true)
+	(cleared["agents"][0] as Dictionary).erase("filler_lines")
+	(cleared["agents"][0] as Dictionary).erase("profanity")
+	var plain := CaseLoader.parse(CaseLoader.save_document(cleared))
+	assert_eq(plain.case_data.agents[0].profanity, "never")
+	assert_eq(plain.case_data.agents[0].filler_lines.size(), 0)
+	assert_eq(FillerBank.lines_for(plain.case_data.agents[0]), FillerBank.standard_lines())
+	var empty_lines: Dictionary = saved.duplicate(true)
+	empty_lines["agents"][0]["filler_lines"] = []
+	var empty_agent := CaseLoader.parse(CaseLoader.save_document(empty_lines)).case_data.agents[0]
+	assert_eq(FillerBank.lines_for(empty_agent), FillerBank.standard_lines())
+	var bad: Dictionary = saved.duplicate(true)
+	bad["agents"][0]["profanity"] = "always"
+	var rejected := CaseLoader.parse(bad)
+	assert_false(rejected.ok)
+	assert_eq(rejected.errors[0]["code"], "agent_profanity")
+	assert_true(rejected.case_data == null)
+
+
+func _key_count(value: Variant, key: String) -> int:
+	var count := 0
+	if value is Dictionary:
+		var body := value as Dictionary
+		if body.has(key):
+			count += 1
+		for child in body.values():
+			count += _key_count(child, key)
+	elif value is Array:
+		for child in value:
+			count += _key_count(child, key)
+	return count
 
 
 func _expect_code(raw: Dictionary, code: String) -> void:

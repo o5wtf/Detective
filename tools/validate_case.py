@@ -92,7 +92,7 @@ def validate(case):
     # Агенты
     for a in agents:
         aid = a.get("id")
-        for key in ("name", "role", "personality", "prompt_background", "background", "facts"):
+        for key in ("name", "role", "personality", "prompt_background", "facts"):
             if key not in a or a[key] in ("", None):
                 err(f"агент {aid}: нет поля {key}")
         emo = a.get("starting_emotion", "neutral")
@@ -240,10 +240,6 @@ def validate(case):
         for a in e.get("related_agent_ids", []):
             if a not in agent_ids:
                 err(f"улика {eid}: агент {a} не существует")
-        if e.get("is_key") and not e.get("related_fact_ids") and not e.get("related_agent_ids"):
-            err(f"ключевая улика {eid} ни с чем не связана")
-        if e.get("is_key") and not e.get("related_fact_ids"):
-            err(f"ключевая улика {eid} не связана ни с одним фактом")
         check_cond(e.get("unlock_condition"), f"улика {eid}", eid)
 
     # Взаимность связей факт <-> улика (предупреждения не блокируют)

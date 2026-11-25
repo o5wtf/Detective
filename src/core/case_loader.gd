@@ -29,13 +29,26 @@ static func load_case(path: String) -> Result:
 	if typeof(parser.data) != TYPE_DICTIONARY:
 		result.errors.append(CaseValidator.error("json_not_object", "JSON дела должен быть объектом, а не %s" % type_string(typeof(parser.data))))
 		return result
-	var raw := parser.data as Dictionary
+	return parse(parser.data as Dictionary)
+
+
+## Разбор уже прочитанного словаря. load_case вызывает это после JSON.
+static func parse(raw: Dictionary) -> Result:
+	var result := Result.new()
 	result.errors = CaseValidator.validate(raw)
 	if not result.errors.is_empty():
 		return result
 	result.ok = true
 	result.case_data = _parse(raw)
 	return result
+
+
+## Сохранение без правок. Словарь не собирается из CaseData: незнакомые ключи остаются.
+static func save_document(raw: Dictionary) -> Dictionary:
+	var parsed: Variant = JSON.parse_string(JSON.stringify(raw))
+	if parsed is Dictionary:
+		return parsed
+	return {}
 
 
 static func _parse(raw: Dictionary) -> CaseData:
