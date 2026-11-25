@@ -99,15 +99,6 @@ static func _inspect(raw: Dictionary) -> Dictionary:
 				lie_facts[contradiction_body.get("fact_%s_id" % side)] = true
 	for fact_id in facts:
 		_validate_fact(str(fact_id), facts[fact_id], facts, evidence_ids, lie_facts, errors)
-		for item in _as_array((facts[fact_id] as Dictionary).get("partial_truth", [])):
-			if item is not Dictionary:
-				continue
-			var body := item as Dictionary
-			if str(body.get("source", "")) == "contradiction" and not contradiction_ids.has(body.get("id")):
-				errors.append(error(
-					"partial_truth_contradiction",
-					"факт %s: противоречие %s не найдено" % [str(fact_id), _show(body.get("id"))]
-				))
 	for contradiction_id in contradiction_ids:
 		_validate_contradiction(contradiction_id, contradiction_ids[contradiction_id], facts, errors)
 	for evidence_id in evidence_ids:
@@ -261,21 +252,8 @@ static func _validate_fact(
 		if not facts.has(prior_id):
 			errors.append(error(
 				"requires_broken_unknown",
-				"%s: requires_broken_lies ссылается на неизвестный факт %s" % [where, _show(prior_id)]
-			))
-	for item in _as_array(fact.get("partial_truth", [])):
-		if item is not Dictionary:
-			errors.append(error("partial_truth_shape", "%s: partial_truth должен быть списком объектов" % where))
-			continue
-		var body := item as Dictionary
-		var source := str(body.get("source", ""))
-		var source_id := str(body.get("id", ""))
-		if source != "evidence" and source != "contradiction":
-			errors.append(error("partial_truth_source", "%s: partial_truth source '%s' не evidence/contradiction" % [where, source]))
-		if _falsy(body.get("text")):
-			errors.append(error("partial_truth_text", "%s: partial_truth без text" % where))
-		if source == "evidence" and not evidence_ids.has(source_id):
-			errors.append(error("partial_truth_evidence", "%s: улика %s не найдена" % [where, source_id]))
+			"%s: requires_broken_lies ссылается на неизвестный факт %s" % [where, _show(prior_id)]
+		))
 
 
 static func _validate_contradiction(

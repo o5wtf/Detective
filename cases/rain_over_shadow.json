@@ -84,13 +84,6 @@
           "breaks_lie_on": "contradiction",
           "tags": [
             "alina"
-          ],
-          "partial_truth": [
-            {
-              "source": "contradiction",
-              "id": "irina_knew",
-              "text": "Знала, что у Виктора кто-то есть."
-            }
           ]
         },
         {
@@ -124,13 +117,6 @@
           "breaks_lie_on": "evidence",
           "tags": [
             "secret"
-          ],
-          "partial_truth": [
-            {
-              "source": "evidence",
-              "id": "ev_divorce_papers",
-              "text": "Думала о разводе."
-            }
           ]
         },
         {
@@ -199,100 +185,65 @@
       "facts": [
         {
           "id": "fact_arkady_debt",
-          "content_basic": "Был должен Виктору деньги.",
-          "content_full": "Должен Виктору 2,5 млн.",
+          "content_basic": "Был должен Виктору крупную сумму.",
+          "content_full": "Должен Виктору около 2,5 млн.",
           "is_lie": true,
           "lie_type": "must_lie",
           "lie_text": "Долгов нет.",
           "related_evidence_ids": [
             "ev_financial_docs"
           ],
-          "requires_evidence": false,
-          "breaks_lie_on": "evidence",
+          "requires_evidence": true,
+          "breaks_lie_on": [
+            "contradiction",
+            "evidence"
+          ],
           "tags": [
             "money"
-          ],
-          "partial_truth": [
-            {
-              "source": "contradiction",
-              "id": "arkady_debt",
-              "text": "Был должен Виктору крупную сумму. Точную цифру не называй, если её не показали."
-            },
-            {
-              "source": "evidence",
-              "id": "ev_financial_docs",
-              "text": "Должен около 2,5 млн. Больше не выдумывай."
-            }
           ]
         },
         {
           "id": "fact_arkady_knife",
           "content_basic": "Вечером заходил на кухню.",
-          "content_full": "Брал нож с кухни вечером и не вернул.",
+          "content_full": "Вечером брал нож с кухни и не вернул.",
           "is_lie": true,
           "lie_type": "must_lie",
           "lie_text": "Не был на кухне.",
           "related_evidence_ids": [
             "ev_kitchen_knife"
           ],
-          "requires_evidence": false,
-          "breaks_lie_on": "contradiction",
+          "requires_evidence": true,
+          "breaks_lie_on": [
+            "contradiction",
+            "evidence"
+          ],
           "tags": [
             "knife"
-          ],
-          "partial_truth": [
-            {
-              "source": "contradiction",
-              "id": "arkady_kitchen",
-              "text": "Вечером заходил на кухню."
-            },
-            {
-              "source": "evidence",
-              "id": "ev_kitchen_knife",
-              "text": "Брал нож с кухни и не вернул."
-            }
           ]
         },
         {
           "id": "fact_arkady_meeting",
-          "content_basic": "Задержался в клубе после закрытия.",
-          "content_full": "Встретился с Виктором в аллее около 01:15, а примерно в 01:18 ушёл через чёрный ход.",
+          "content_basic": "Не уходил в 00:30, был в клубе после закрытия.",
+          "content_full": "Был в клубе после закрытия и вышел около 01:18 через чёрный ход.",
           "is_lie": true,
           "lie_type": "must_lie",
           "lie_text": "Ушёл домой в 00:30.",
           "related_evidence_ids": [
             "ev_security_log"
           ],
-          "requires_evidence": false,
+          "requires_evidence": true,
           "breaks_lie_on": [
             "contradiction",
             "evidence"
           ],
           "tags": [
             "time"
-          ],
-          "partial_truth": [
-            {
-              "source": "contradiction",
-              "id": "arkady_alibi",
-              "text": "Не ушёл в 00:30: был в клубе после закрытия."
-            },
-            {
-              "source": "contradiction",
-              "id": "arkady_alibi_mira",
-              "text": "Был в клубе около 00:50, не ушёл в 00:30."
-            },
-            {
-              "source": "evidence",
-              "id": "ev_security_log",
-              "text": "Вышел около 01:18 через чёрный ход."
-            }
           ]
         },
         {
           "id": "fact_arkady_humiliation",
-          "content_basic": "Виктор угрожал выгнать его из дела.",
-          "content_full": "Виктор собирался публично выкинуть его и рассказать про Миру.",
+          "content_basic": "Виктор грозил выгнать его из дела.",
+          "content_full": "Виктор грозил выгнать его из дела.",
           "is_lie": true,
           "lie_type": "must_lie",
           "lie_text": "Виктор ничего такого не говорил, всё было спокойно.",
@@ -302,19 +253,12 @@
           "tags": [
             "motive",
             "mira"
-          ],
-          "partial_truth": [
-            {
-              "source": "contradiction",
-              "id": "arkady_humiliation",
-              "text": "Виктор грозил выгнать из дела."
-            }
           ]
         },
         {
           "id": "fact_arkady_mira_blame",
           "content_basic": "Мира знала про его долги и злилась на него.",
-          "content_full": "Мира предлагала убрать Виктора, но он отказался. Она злилась.",
+          "content_full": "Мира сказала ему: «если ты не решишь, я решу сама».",
           "is_lie": true,
           "lie_type": "can_lie",
           "lie_text": "Мира тут ни при чём.",
@@ -323,19 +267,12 @@
           "breaks_lie_on": "contradiction",
           "tags": [
             "mira"
-          ],
-          "partial_truth": [
-            {
-              "source": "contradiction",
-              "id": "arkady_mira_blame",
-              "text": "Мира сказала: если ты не решишь, я решу сама. Что было дальше, не рассказывай."
-            }
           ]
         },
         {
           "id": "fact_arkady_panic",
           "content_basic": "Был с Виктором в аллее, когда всё случилось.",
-          "content_full": "Ударил в панике и ярости.",
+          "content_full": "Был с Виктором в аллее, когда всё случилось, и ударил его в панике и ярости.",
           "is_lie": true,
           "lie_type": "must_lie",
           "lie_text": "Я его не трогал.",
@@ -350,13 +287,6 @@
           "requires_broken_lies": [
             "fact_arkady_meeting",
             "fact_arkady_knife"
-          ],
-          "partial_truth": [
-            {
-              "source": "evidence",
-              "id": "ev_kitchen_knife",
-              "text": "Был с Виктором, когда это случилось, и ударил."
-            }
           ]
         }
       ]
@@ -384,7 +314,7 @@
         {
           "id": "fact_mira_arkady",
           "content_basic": "Спала с Аркадием.",
-          "content_full": "Регулярно спала с Аркадием, знала про долги и предлагала решить вопрос жёстче.",
+          "content_full": "Спала с Аркадием.",
           "is_lie": true,
           "lie_type": "can_lie",
           "lie_text": "Ничего такого не было.",
@@ -394,13 +324,6 @@
           "tags": [
             "arkady",
             "secret"
-          ],
-          "partial_truth": [
-            {
-              "source": "contradiction",
-              "id": "mira_arkady",
-              "text": "Спала с Аркадием."
-            }
           ]
         },
         {
@@ -420,7 +343,7 @@
         {
           "id": "fact_mira_knife",
           "content_basic": "Спрашивала у Павла про нож на кухне.",
-          "content_full": "Спрашивала у Павла вечером, где лежит нож на кухне. Хотела проверить, легко ли его взять, если Аркадий всё-таки согласится на жёсткий вариант. Сама брать не собиралась.",
+          "content_full": "Спрашивала у Павла про нож на кухне.",
           "is_lie": true,
           "lie_type": "must_lie",
           "lie_text": "Не спрашивала.",
@@ -428,22 +351,13 @@
             "ev_kitchen_knife"
           ],
           "requires_evidence": false,
-          "breaks_lie_on": "contradiction",
+          "breaks_lie_on": [
+            "contradiction",
+            "evidence"
+          ],
           "tags": [
             "knife",
             "pavel"
-          ],
-          "partial_truth": [
-            {
-              "source": "contradiction",
-              "id": "mira_knife",
-              "text": "Спрашивала у Павла про нож на кухне."
-            },
-            {
-              "source": "evidence",
-              "id": "ev_kitchen_knife",
-              "text": "Спрашивала у Павла про нож на кухне."
-            }
           ]
         },
         {
@@ -460,13 +374,6 @@
           "breaks_lie_on": "evidence",
           "tags": [
             "secret"
-          ],
-          "partial_truth": [
-            {
-              "source": "evidence",
-              "id": "ev_mira_notes",
-              "text": "Записывает кое-что о клиентах."
-            }
           ]
         },
         {
@@ -485,32 +392,23 @@
         },
         {
           "id": "fact_mira_return",
-          "content_basic": "Около 01:05 ненадолго возвращалась в клуб за забытым блокнотом и около 01:10 ушла.",
-          "content_full": "Вернулась около 01:05 через служебный вход за блокнотом с записями, который забыла в гримёрке. Заплатила Роману, чтобы он не записывал её возвращение. Около 01:10, уходя, видела, как Аркадий позвал Виктора к чёрному ходу в аллею; правую руку он держал в кармане пиджака. Испугалась и сразу ушла через главный вход. Молчала, потому что боялась, что подумают на неё, и не хотела, чтобы нашли её записи.",
+          "content_basic": "Возвращалась в клуб и заплатила Роману, чтобы он не записывал.",
+          "content_full": "Около 01:05 вернулась через служебный вход за блокнотом с записями, заплатила Роману, чтобы не записывал, и около 01:10 ушла через главный вход.",
           "is_lie": true,
           "lie_type": "must_lie",
           "lie_text": "Ушла в 00:50 и больше не возвращалась.",
           "related_evidence_ids": [
             "ev_mira_notes"
           ],
-          "requires_evidence": false,
-          "breaks_lie_on": "contradiction",
+          "requires_evidence": true,
+          "breaks_lie_on": [
+            "contradiction",
+            "evidence"
+          ],
           "tags": [
             "time",
             "arkady",
             "secret"
-          ],
-          "partial_truth": [
-            {
-              "source": "contradiction",
-              "id": "mira_return",
-              "text": "Возвращалась и платила Роману, чтобы не записывал."
-            },
-            {
-              "source": "evidence",
-              "id": "ev_mira_notes",
-              "text": "Возвращалась около 01:05 за блокнотом и заплатила Роману."
-            }
           ]
         },
         {
@@ -581,7 +479,7 @@
         {
           "id": "fact_pavel_mira_knife",
           "content_basic": "Мира вечером спрашивала его про нож.",
-          "content_full": "Мира спрашивала вечером, где лежит нож на кухне.",
+          "content_full": "Мира вечером спрашивала, где на кухне лежит нож.",
           "is_lie": true,
           "lie_type": "can_lie",
           "lie_text": "Ни о чём таком не спрашивала.",
@@ -593,19 +491,12 @@
           "tags": [
             "mira",
             "knife"
-          ],
-          "partial_truth": [
-            {
-              "source": "evidence",
-              "id": "ev_kitchen_knife",
-              "text": "Мира вечером спрашивала его про нож."
-            }
           ]
         },
         {
           "id": "fact_pavel_arkady_kitchen",
           "content_basic": "Видел, как Аркадий вечером заходил на кухню.",
-          "content_full": "После разговора с Мирой Аркадий зашёл на кухню и вышел оттуда с чем-то в руке. Я не уверен, но это мог быть нож.",
+          "content_full": "Видел, как Аркадий вечером заходил на кухню.",
           "is_lie": true,
           "lie_type": "can_lie",
           "lie_text": "Ничего такого не видел.",
@@ -618,13 +509,6 @@
             "arkady",
             "knife",
             "time"
-          ],
-          "partial_truth": [
-            {
-              "source": "evidence",
-              "id": "ev_kitchen_knife",
-              "text": "Видел, как Аркадий вечером заходил на кухню."
-            }
           ]
         },
         {
@@ -777,13 +661,6 @@
           "breaks_lie_on": "evidence",
           "tags": [
             "threat"
-          ],
-          "partial_truth": [
-            {
-              "source": "evidence",
-              "id": "ev_alina_messages",
-              "text": "Писала Виктору резкие сообщения."
-            }
           ]
         },
         {
@@ -885,8 +762,8 @@
         },
         {
           "id": "fact_roman_bribe",
-          "content_basic": "Иногда за деньги не записывает, кто приходит и уходит после закрытия. В ту ночь ему заплатила Мира.",
-          "content_full": "Иногда берёт деньги, чтобы не фиксировать поздние выходы. В ту ночь Мира вернулась около 01:05 через служебный вход, заплатила, чтобы он не записывал её возвращение, и около 01:10 ушла через главный вход.",
+          "content_basic": "Иногда за деньги не записывает поздние выходы. В ту ночь ему заплатила Мира.",
+          "content_full": "Иногда за деньги не записывает, кто приходит и уходит после закрытия. В ту ночь ему заплатила Мира.",
           "is_lie": true,
           "lie_type": "can_lie",
           "lie_text": "Никогда ничего такого не было.",
@@ -898,13 +775,6 @@
           "tags": [
             "secret",
             "mira"
-          ],
-          "partial_truth": [
-            {
-              "source": "evidence",
-              "id": "ev_security_log",
-              "text": "Иногда за деньги не записывает, кто приходит и уходит после закрытия. В ту ночь ему заплатила Мира."
-            }
           ]
         }
       ]
@@ -979,7 +849,8 @@
         "fact_arkady_knife",
         "fact_pavel_arkady_kitchen",
         "fact_mira_knife",
-        "fact_pavel_mira_knife"
+        "fact_pavel_mira_knife",
+        "fact_arkady_panic"
       ],
       "related_agent_ids": [
         "arkady_volkov",

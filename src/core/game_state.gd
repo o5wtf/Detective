@@ -16,8 +16,6 @@ var contradiction_turns: Dictionary = {}
 var evidence_mentions: Array[String] = []
 ## Сколько раз персонаж уже касался темы закрытой улики. Старые сохранения поля не имеют.
 var topic_touches: Dictionary = {}
-## Какие куски правды уже открыты: fact_id -> [{source, id, text}]. Старые сохранения поля не имеют.
-var revealed_parts: Dictionary = {}
 var talked_to: Array[String] = []
 var accusation: Dictionary = {
 	"killer_ok": false,
@@ -44,7 +42,6 @@ func to_dict() -> Dictionary:
 		"contradiction_turns": contradiction_turns.duplicate(true),
 		"evidence_mentions": evidence_mentions.duplicate(),
 		"topic_touches": topic_touches.duplicate(true),
-		"revealed_parts": revealed_parts.duplicate(true),
 		"talked_to": talked_to.duplicate(),
 		"accusation": accusation.duplicate(true),
 		"dialogues": dialogues.duplicate(true),
@@ -67,7 +64,6 @@ static func from_dict(data: Dictionary) -> GameState:
 	state.contradiction_turns = _int_map(data.get("contradiction_turns", {}))
 	state.evidence_mentions = _string_list(data.get("evidence_mentions", []))
 	state.topic_touches = _int_map(data.get("topic_touches", {}))
-	state.revealed_parts = _revealed_map(data.get("revealed_parts", {}))
 	state.talked_to = _string_list(data.get("talked_to", []))
 	state.accusation = _accusation(data.get("accusation", {}))
 	state.dialogues = (data.get("dialogues", {}) as Dictionary).duplicate(true)
@@ -75,27 +71,6 @@ static func from_dict(data: Dictionary) -> GameState:
 	state.case_id = str(data.get("case_id", ""))
 	state.case_version_hash = str(data.get("case_version_hash", ""))
 	return state
-
-
-static func _revealed_map(value: Variant) -> Dictionary:
-	var result := {}
-	if value is not Dictionary:
-		return result
-	for key in value:
-		var rows: Array[Dictionary] = []
-		var items: Variant = value[key]
-		if items is Array:
-			for item in items:
-				if item is not Dictionary:
-					continue
-				var body := item as Dictionary
-				rows.append({
-					"source": str(body.get("source", "")),
-					"id": str(body.get("id", "")),
-					"text": str(body.get("text", "")),
-				})
-		result[str(key)] = rows
-	return result
 
 
 static func _int_map(value: Variant) -> Dictionary:

@@ -37,6 +37,22 @@ func test_scenes_instantiate_and_buttons_exist() -> void:
 		node.free()
 
 
+func test_briefing_has_no_atmosphere_and_accusation_scrolls() -> void:
+	var briefing := (load("res://ui/screens/briefing.tscn") as PackedScene).instantiate()
+	(Engine.get_main_loop() as SceneTree).root.add_child(briefing)
+	await (Engine.get_main_loop() as SceneTree).process_frame
+	assert_true(briefing.find_child("AtmosphereLabel", true, false) == null)
+	assert_true(briefing.find_child("BriefingLabel", true, false) != null)
+	briefing.free()
+	var accusation := (load("res://ui/screens/accusation.tscn") as PackedScene).instantiate()
+	(Engine.get_main_loop() as SceneTree).root.add_child(accusation)
+	await (Engine.get_main_loop() as SceneTree).process_frame
+	var scroll := accusation.find_child("AccusationScroll", true, false) as ScrollContainer
+	assert_true(scroll != null)
+	assert_true(scroll.vertical_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED)
+	accusation.free()
+
+
 func test_portrait_scale_keeps_physical_size() -> void:
 	var base := UiLayout.BASE_SIZE
 	assert_true(absf(UiLayout.content_scale_factor_for(Vector2(1280, 800)) - 1.0) < 0.001)
@@ -61,6 +77,8 @@ func test_developer_pressure_sits_next_to_the_remark() -> void:
 	assert_true(UiStrings.state_line("tense", "angry", 42, true).contains("давление 42"))
 	assert_eq(UiStrings.state_remark("nervous", "nervous"), "«заметно нервничает»")
 	assert_eq(UiStrings.state_remark("tense", "angry"), "«напряжён», злится")
+	assert_eq(UiStrings.evidence_kind("scene"), "сцена")
+	assert_eq(UiStrings.evidence_kind("документ"), "документ")
 	var meter := LevelMeter.new()
 	meter.push(1.0)
 	assert_false(meter.advance(0.01))
@@ -71,6 +89,39 @@ func test_developer_pressure_sits_next_to_the_remark() -> void:
 		meter.advance(0.05)
 		steps += 1
 	assert_true(meter.shown < 0.2)
+
+
+func test_settings_cache_matches_the_file_and_drops_after_each_writer() -> void:
+	var path := "user://config.cfg"
+	var previous := FileAccess.get_file_as_string(path) if FileAccess.file_exists(path) else ""
+	SettingsStore.invalidate_cache()
+	SettingsStore.save_values("mock", "cache-marker", "gemini-3.5-flash-lite", 1.0, null, null, null, null, true, "push_to_talk")
+	var first := SettingsStore.load_current()
+	var second := SettingsStore.load_current()
+	assert_eq(first.dialogue_model, second.dialogue_model)
+	assert_eq(first.mic_mode, "push_to_talk")
+	assert_eq(first.api_key, "cache-marker")
+	SettingsStore.save_values("mock", "cache-marker", "gemini-3.6-flash", 1.0, null, null, null, null, true, "hands_free")
+	var saved := SettingsStore.load_current()
+	assert_eq(saved.dialogue_model, "gemini-3.6-flash")
+	assert_eq(saved.mic_mode, "hands_free")
+	SettingsStore.remember_thinking("gemini-3.6-flash", "LOW")
+	var after_thinking := SettingsStore.load_current()
+	assert_eq(after_thinking.dialogue_model, "gemini-3.6-flash")
+	var file := ConfigFile.new()
+	assert_eq(file.load(path), OK)
+	file.set_value("mic", "pause_ms", 1500)
+	file.save(path)
+	var reread := SettingsStore.load_current()
+	assert_eq(reread.mic_pause_ms, 1500)
+	assert_eq(LLMConfig.load_settings().dialogue_model, "gemini-3.6-flash")
+	if previous == "":
+		DirAccess.remove_absolute(path)
+	else:
+		var restore := FileAccess.open(path, FileAccess.WRITE)
+		restore.store_string(previous)
+		restore.close()
+	SettingsStore.invalidate_cache()
 
 
 func test_remarks_have_no_digits() -> void:

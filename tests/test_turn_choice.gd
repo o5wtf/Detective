@@ -103,9 +103,11 @@ func test_topic_counter_survives_an_old_save() -> void:
 	state.pressure["a"] = 4
 	var restored := GameState.from_dict(state.to_dict())
 	assert_eq(int(restored.topic_touches["b|log"]), 1)
-	var legacy := GameState.from_dict({"pressure": {"a": 4}, "fatigue": {"a": 9}})
+	var legacy := GameState.from_dict({"pressure": {"a": 4}, "fatigue": {"a": 9}, "revealed_parts": {"fa": [{"text": "кусок"}]}})
 	assert_eq(int(legacy.pressure["a"]), 4)
 	assert_true(legacy.topic_touches.is_empty())
+	assert_true(legacy.evidence_mentions.is_empty())
+	assert_false(legacy.to_dict().has("revealed_parts"))
 
 
 func test_restart_keeps_only_the_final_reply() -> void:
@@ -207,14 +209,17 @@ func _engine(data: CaseData) -> RulesEngine:
 	return engine
 
 
-func test_partial_citation_admits_only_the_slice() -> void:
+func test_citation_admits_the_general_layer_until_evidence_is_shown() -> void:
 	var data := _case()
 	var lie := _fact(data, "a", "fa")
 	lie.is_lie = true
 	lie.lie_type = "must_lie"
 	lie.lie_text = "Ушёл в полночь."
-	lie.content_full = "Вышел в час и встретился в аллее."
-	lie.partial_truth = [{"source": "contradiction", "id": "c", "text": "Вышел в час."}]
+	lie.content_basic = "общее"
+	lie.content_full = "общее и тайная подробность"
+	lie.requires_evidence = true
+	lie.related_evidence_ids = ["log"]
+	lie.breaks_lie_on = ["contradiction", "evidence"]
 	_fact(data, "b", "fb")
 	var contradiction := CaseData.Contradiction.new()
 	contradiction.id = "c"
@@ -227,15 +232,28 @@ func test_partial_citation_admits_only_the_slice() -> void:
 	engine.state.heard.append({"agent_id": "b", "fact_id": "fb", "form": "basic", "turn": 1})
 	var options := TurnOptions.build(data, engine.state, "a")
 	var plan := TurnOptions.plan(data, engine.state, "a", options, [int(options[0]["n"])])
-	assert_true((plan["break_lies"] as Array).is_empty())
-	assert_eq((plan["grants"] as Array).size(), 1)
-	assert_eq(str((plan["admit"] as Array)[0]), "Вышел в час.")
+	assert_eq((plan["break_lies"] as Array)[0], "fa")
+	assert_eq(str((plan["admit"] as Array)[0]), "общее")
 	engine.commit_plan("a", plan)
-	assert_true(engine.state.broken_lies.has("fa"))
-	var packet := engine.get_packet("a")
-	var dumped := JSON.stringify(packet)
-	assert_true(dumped.contains("Вышел в час"))
-	assert_false(dumped.contains("аллее"))
+	var dumped := JSON.stringify(engine.get_packet("a"))
+	assert_true(dumped.contains("общее"))
+	assert_false(dumped.contains("тайная"))
+	var blocked := _fact(data, "a", "late")
+	blocked.is_lie = true
+	blocked.lie_type = "must_lie"
+	blocked.lie_text = "Не я."
+	blocked.requires_broken_lies = ["not_yet"]
+	blocked.breaks_lie_on = "contradiction"
+	var late := CaseData.Contradiction.new()
+	late.id = "late_c"
+	late.fact_a_id = "late"
+	late.fact_a_form = "lie"
+	late.fact_b_id = "fb"
+	late.fact_b_form = "truth"
+	data.contradictions = [contradiction, late]
+	var waiting := TurnOptions.build(data, engine.state, "a")
+	for option in waiting:
+		assert_true(str(option.get("lie_id", "")) != "late")
 
 
 func test_voice_present_uses_only_unlocked_evidence_and_its_substance() -> void:

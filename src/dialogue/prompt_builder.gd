@@ -159,10 +159,6 @@ static func _packet_line(entry: Dictionary) -> String:
 	var lie_text := str(entry.get("lie_text", ""))
 	if mode == "full" or mode == "basic":
 		return "%s [ПРАВДА]: %s" % [key, content]
-	if mode == "partial":
-		return "%s [ПРАВДА, ТОЛЬКО ЭТО]: %s" % [key, content]
-	if str(entry.get("partial", "")) != "":
-		return "%s [ЛОЖЬ]: %s. Признай только это и не больше: «%s»." % [key, lie_text, str(entry.get("partial", ""))]
 	if mode == "lie_or_basic":
 		return "%s [ЛОЖЬ, МОЖНО ОГОВОРИТЬСЯ]: твоя версия: «%s». Проговориться можно только так: «%s»" % [key, lie_text, content]
 	return "%s [ЛОЖЬ]: %s" % [key, lie_text if lie_text != "" else content]

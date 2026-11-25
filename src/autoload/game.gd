@@ -14,10 +14,6 @@ var case_path: String = ""
 
 var _engine: RulesEngine = null
 var _dialogues: Dictionary = {}
-var _leak_max_stems: int = 1
-var _log_leaks: bool = true
-var last_mentioned_evidence: Array[String] = []
-var last_requested_evidence: String = ""
 var last_turn_line: String = ""
 var last_turn_stats: Dictionary = {}
 ## Интонация последней реплики для синтеза. В текст реплики не входит.
@@ -51,11 +47,6 @@ func open_case(path: String) -> CaseLoader.Result:
 		state.dialogues[agent.id] = (_dialogues[agent.id] as DialogueState).to_dict()
 	notebook = Notebook.new(case_data, state)
 	case_opened.emit()
-	var config := LLMConfig.load_settings()
-	_leak_max_stems = 1
-	_log_leaks = true
-	if config != null:
-		pass
 	return loaded
 
 
@@ -126,8 +117,6 @@ func _turn(agent_id: String, player_text: String, event_note: String, evidence_i
 	Speaker.cancel_inflight()
 	Speaker.dismiss_retry()
 	var turn_config := LLMConfig.load_settings()
-	last_mentioned_evidence = []
-	last_requested_evidence = ""
 	var turn_started := Time.get_ticks_msec()
 	var tally := LlmTiming.empty_tally()
 	var turn_model := ""
@@ -345,8 +334,8 @@ func _validate_result(result: Dictionary, packet: Array, agent_id: String, dialo
 		"dialogue": dialogue,
 		"player_text": player_text,
 		"previous_emotion": str(state.emotion.get(agent_id, "neutral")),
-		"leak_max_stems": _leak_max_stems,
-		"log_leaks": _log_leaks,
+		"leak_max_stems": 1,
+		"log_leaks": true,
 		"local_fixes": local_fixes,
 		"evidence_keys": PromptBuilder.report_evidence_keys(case_data, state, agent_id),
 		"notebook_ids": PromptBuilder.notebook_ids(case_data, state),
@@ -428,7 +417,6 @@ func _restore(snapshot: Dictionary) -> void:
 	state.contradiction_turns = fresh.contradiction_turns
 	state.evidence_mentions = fresh.evidence_mentions
 	state.topic_touches = fresh.topic_touches
-	state.revealed_parts = fresh.revealed_parts
 	state.talked_to = fresh.talked_to
 	state.accusation = fresh.accusation
 	state.dialogues = fresh.dialogues
@@ -439,8 +427,3 @@ func _restore(snapshot: Dictionary) -> void:
 		var saved: Variant = fresh.dialogues.get(agent_id, {})
 		if saved is Dictionary:
 			_dialogues[agent_id] = DialogueState.from_dict(saved)
-	for agent_id in _dialogues.keys():
-		var live: DialogueState = _dialogues[agent_id]
-		var saved_body: Variant = state.dialogues.get(agent_id, {})
-		if saved_body is Dictionary and live.to_dict() != (saved_body as Dictionary):
-			_dialogues[agent_id] = DialogueState.from_dict(saved_body)

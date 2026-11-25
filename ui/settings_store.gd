@@ -33,43 +33,90 @@ var developer: bool = false
 ## gemini | system. По умолчанию облачное распознавание.
 var stt_backend: String = "gemini"
 
+static var _cached: SettingsStore
+static var _cached_hash: String = ""
+static var _cached_env: String = ""
+
+
+static func invalidate_cache() -> void:
+	_cached = null
+	_cached_hash = ""
+	_cached_env = ""
+	LLMConfig.invalidate_cache()
+
 
 static func load_current() -> SettingsStore:
+	var env := OS.get_environment("GEMINI_API_KEY")
+	var digest := _file_hash()
+	if _cached != null and digest == _cached_hash and env == _cached_env:
+		return _cached.detached()
 	var store := SettingsStore.new()
 	var config := LLMConfig.load_settings()
 	store.provider = config.provider
 	store.api_key = config.api_key
 	store.dialogue_model = config.dialogue_model
 	var file := ConfigFile.new()
-	if file.load(PATH) == OK and file.has_section_key("ui", "text_scale"):
+	var loaded := file.load(PATH) == OK
+	if loaded and file.has_section_key("ui", "text_scale"):
 		store.text_scale = clampf(float(file.get_value("ui", "text_scale")), 0.85, 1.4)
-	if file.load(PATH) == OK and file.has_section_key("llm", "timing_debug"):
+	if loaded and file.has_section_key("llm", "timing_debug"):
 		store.timing_debug = bool(file.get_value("llm", "timing_debug"))
-	if file.load(PATH) == OK and file.has_section_key("voice", "enabled"):
+	if loaded and file.has_section_key("voice", "enabled"):
 		store.voice_enabled = bool(file.get_value("voice", "enabled"))
-	if file.load(PATH) == OK and file.has_section_key("voice", "engine"):
+	if loaded and file.has_section_key("voice", "engine"):
 		store.voice_engine = canonical_engine(str(file.get_value("voice", "engine")))
-	if file.load(PATH) == OK and file.has_section_key("voice", "tts_model"):
+	if loaded and file.has_section_key("voice", "tts_model"):
 		store.tts_model = str(file.get_value("voice", "tts_model"))
-	if file.load(PATH) == OK and file.has_section_key("voice", "tts_auto"):
+	if loaded and file.has_section_key("voice", "tts_auto"):
 		store.tts_auto = bool(file.get_value("voice", "tts_auto"))
-	if file.load(PATH) == OK and file.has_section_key("voice", "chirp_key"):
+	if loaded and file.has_section_key("voice", "chirp_key"):
 		store.chirp_key = str(file.get_value("voice", "chirp_key"))
-	if file.load(PATH) == OK and file.has_section_key("voice", "intonation"):
+	if loaded and file.has_section_key("voice", "intonation"):
 		store.voice_intonation = bool(file.get_value("voice", "intonation"))
-	if file.load(PATH) == OK and file.has_section_key("mic", "enabled"):
+	if loaded and file.has_section_key("mic", "enabled"):
 		store.mic_enabled = bool(file.get_value("mic", "enabled"))
-	if file.load(PATH) == OK and file.has_section_key("mic", "mode"):
+	if loaded and file.has_section_key("mic", "mode"):
 		store.mic_mode = "hands_free" if str(file.get_value("mic", "mode")) == "hands_free" else "push_to_talk"
-	if file.load(PATH) == OK and file.has_section_key("mic", "pause_ms"):
+	if loaded and file.has_section_key("mic", "pause_ms"):
 		store.mic_pause_ms = clampi(int(file.get_value("mic", "pause_ms")), 400, 2000)
-	if file.load(PATH) == OK and file.has_section_key("llm", "developer"):
+	if loaded and file.has_section_key("llm", "developer"):
 		store.developer = bool(file.get_value("llm", "developer"))
 	store.stt_backend = "gemini"
-	if file.load(PATH) == OK and str(file.get_value("mic", "stt", "gemini")) == "system":
+	if loaded and str(file.get_value("mic", "stt", "gemini")) == "system":
 		file.set_value("mic", "stt", "gemini")
 		file.save(PATH)
-	return store
+		invalidate_cache()
+	_cached = store
+	_cached_hash = _file_hash()
+	_cached_env = env
+	return store.detached()
+
+
+func detached() -> SettingsStore:
+	var copy := SettingsStore.new()
+	copy.provider = provider
+	copy.api_key = api_key
+	copy.dialogue_model = dialogue_model
+	copy.text_scale = text_scale
+	copy.timing_debug = timing_debug
+	copy.voice_enabled = voice_enabled
+	copy.voice_engine = voice_engine
+	copy.tts_model = tts_model
+	copy.tts_auto = tts_auto
+	copy.chirp_key = chirp_key
+	copy.voice_intonation = voice_intonation
+	copy.mic_enabled = mic_enabled
+	copy.mic_mode = mic_mode
+	copy.mic_pause_ms = mic_pause_ms
+	copy.developer = developer
+	copy.stt_backend = stt_backend
+	return copy
+
+
+static func _file_hash() -> String:
+	if not FileAccess.file_exists(PATH):
+		return ""
+	return FileAccess.get_sha256(PATH)
 
 
 static func canonical_engine(engine: String) -> String:
@@ -110,6 +157,7 @@ static func save_values(provider: String, api_key: String, dialogue_model: Strin
 		file.set_value("llm", "developer", bool(developer))
 	if stt_backend != null:
 		file.set_value("mic", "stt", "gemini")
+	invalidate_cache()
 	file.save(PATH)
 
 
@@ -121,6 +169,7 @@ static func remember_thinking(model: String, level: String) -> void:
 	var accepted := _thinking_map(str(file.get_value("llm", "thinking_accepted", "")))
 	accepted[model] = level
 	file.set_value("llm", "thinking_accepted", _thinking_text(accepted))
+	invalidate_cache()
 	file.save(PATH)
 
 

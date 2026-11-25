@@ -618,7 +618,6 @@ func _on_replied(reply_agent: String, text: String, remark: String) -> void:
 	_push({"kind": "agent", "text": text, "remark": remark})
 	_render_header()
 	_show_turn_timing()
-	_apply_model_hints()
 
 
 func _on_events(list: Array) -> void:
@@ -660,21 +659,6 @@ func _on_busy(is_busy: bool) -> void:
 		_thinking.visible = true
 	else:
 		_thinking.visible = false
-
-
-func _apply_model_hints() -> void:
-	if Game.last_requested_evidence != "":
-		var requested := _evidence_by_key(Game.last_requested_evidence)
-		if requested != null:
-			var agent: CaseData.Agent = Game.case_data.agent_by_id[agent_id]
-			_push({"kind": "system", "text": UiStrings.demands(agent.name)})
-			_show_hint(requested.id)
-			return
-	for key in Game.last_mentioned_evidence:
-		var mentioned := _evidence_by_key(str(key))
-		if mentioned != null:
-			_show_hint(mentioned.id)
-			return
 
 
 func _event_line(event: Dictionary) -> String:
@@ -776,18 +760,3 @@ func _evidence_title(evidence_id: String) -> String:
 	if Game.case_data == null or not Game.case_data.evidence_by_id.has(evidence_id):
 		return evidence_id
 	return (Game.case_data.evidence_by_id[evidence_id] as CaseData.EvidenceItem).title
-
-
-func _evidence_by_key(key: String) -> CaseData.EvidenceItem:
-	if Game.case_data == null or Game.state == null:
-		return null
-	if key.length() < 2 or not key.begins_with("e"):
-		return null
-	var index := key.substr(1).to_int() - 1
-	var open: Array[CaseData.EvidenceItem] = []
-	for evidence in Game.case_data.evidence:
-		if Game.state.unlocked_evidence.has(evidence.id):
-			open.append(evidence)
-	if index < 0 or index >= open.size():
-		return null
-	return open[index]
