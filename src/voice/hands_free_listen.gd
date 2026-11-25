@@ -100,6 +100,7 @@ func _recognize(pcm: PackedByteArray) -> void:
 	var token := _generation
 	locked = true
 	_set_state(STATE_RECOGNIZE)
+	TurnTiming.begin("gemini")
 	var wav := VoiceAudio.wav_bytes(pcm, PhraseVad.RATE)
 	var result := {"ok": false, "text": "", "error": "offline"}
 	if stt != null:
@@ -108,14 +109,17 @@ func _recognize(pcm: PackedByteArray) -> void:
 		return
 	locked = false
 	if not result.get("ok", false):
-		hint_changed.emit("Не удалось распознать.")
+		var message := str(result.get("message", "")).strip_edges()
+		if message == "":
+			message = "Не удалось распознать."
+		hint_changed.emit(message)
 		retry_visible.emit(true)
 		_set_state(_idle_state())
 		return
 	var text := str(result.get("text", "")).strip_edges()
 	if SpeechJunk.is_junk(text):
 		_log("vad junk")
-		hint_changed.emit(UiStrings.MIC_MISSED)
+		hint_changed.emit(GameLanguage.text("stt_repeat"))
 		_set_state(_idle_state())
 		return
 	retry_visible.emit(false)

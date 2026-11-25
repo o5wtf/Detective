@@ -149,7 +149,7 @@ func _apply(result: Dictionary) -> void:
 	var text := str(result.get("text", "")).strip_edges()
 	if SpeechJunk.is_junk(text):
 		_finish_idle()
-		hint_changed.emit("Не расслышал, повторите")
+		hint_changed.emit(GameLanguage.text("stt_repeat"))
 		return
 	retry_visible.emit(false)
 	TurnTiming.mark("line_shown")

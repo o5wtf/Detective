@@ -24,6 +24,7 @@ var _stt_retry: Button
 var _mic_settings: Button
 var _talk: PushToTalk
 var _hands: HandsFreeListen
+var _local: LocalStt
 var _mic_input: MicInput
 var _access: MicAccess
 var _limit_busy: bool = false
@@ -192,7 +193,20 @@ func _ready() -> void:
 
 
 func _make_stt() -> SttBackend:
-	return GeminiStt.new()
+	var cloud := GeminiStt.new()
+	cloud.name = "GeminiStt"
+	var local := LocalStt.new()
+	local.name = "LocalStt"
+	local.cloud = cloud
+	var router := SttRouter.new()
+	router.name = "SttRouter"
+	router.cloud = cloud
+	router.local = local
+	router.add_child(cloud)
+	router.add_child(local)
+	_local = local
+	local.prepare()
+	return router
 
 
 func _warm_link() -> void:
@@ -269,6 +283,12 @@ func _notification(what: int) -> void:
 			_talk.cancel()
 		if _mic_input != null:
 			_mic_input.stop()
+	if what == NOTIFICATION_APPLICATION_PAUSED and _local != null:
+		_local.release_model()
+	if what == NOTIFICATION_APPLICATION_RESUMED and _local != null:
+		_local.prepare()
+	if what == NOTIFICATION_VISIBILITY_CHANGED and is_inside_tree() and is_visible_in_tree() and _local != null:
+		_local.prepare()
 	if what == NOTIFICATION_VISIBILITY_CHANGED and is_inside_tree() and not is_visible_in_tree():
 		Speaker.stop_and_clear(false)
 		_voice_gate = false
