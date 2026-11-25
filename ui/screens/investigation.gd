@@ -99,6 +99,15 @@ func _process(_delta: float) -> void:
 		_apply_layout()
 
 
+func consume_back() -> bool:
+	if _drawer != null and _drawer.visible:
+		_drawer.visible = false
+		return true
+	if _chat != null and _chat.has_method("consume_back") and _chat.consume_back():
+		return true
+	return false
+
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED:
 		_apply_layout()

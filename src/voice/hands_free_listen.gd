@@ -129,7 +129,10 @@ func _recognize(pcm: PackedByteArray) -> void:
 		_set_state(_idle_state())
 		return
 	var text := str(result.get("text", "")).strip_edges()
-	if SpeechJunk.is_junk(text):
+	var hint := ""
+	if hint_source.is_valid():
+		hint = str(hint_source.call())
+	if SttGuard.reject(text, Game.case_data, Game.state, hint):
 		_log("vad junk")
 		hint_changed.emit(GameLanguage.text("stt_repeat"))
 		_set_state(_idle_state())

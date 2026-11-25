@@ -20,6 +20,8 @@ var topic_touches: Dictionary = {}
 var retold: Array[String] = []
 ## Предъявления против показания. Старые сохранения поля не имеют.
 var confrontations: Array[Dictionary] = []
+## События ленты. Не входят в реплики и в промпт. Старые сохранения поля не имеют.
+var feed_events: Array[Dictionary] = []
 var talked_to: Array[String] = []
 var accusation: Dictionary = {
 	"killer_ok": false,
@@ -48,6 +50,7 @@ func to_dict() -> Dictionary:
 		"topic_touches": topic_touches.duplicate(true),
 		"retold": retold.duplicate(),
 		"confrontations": confrontations.duplicate(true),
+		"feed_events": feed_events.duplicate(true),
 		"talked_to": talked_to.duplicate(),
 		"accusation": accusation.duplicate(true),
 		"dialogues": dialogues.duplicate(true),
@@ -72,6 +75,7 @@ static func from_dict(data: Dictionary) -> GameState:
 	state.topic_touches = _int_map(data.get("topic_touches", {}))
 	state.retold = _string_list(data.get("retold", []))
 	state.confrontations = _confrontation_list(data.get("confrontations", []))
+	state.feed_events = _event_list(data.get("feed_events", []))
 	state.talked_to = _string_list(data.get("talked_to", []))
 	state.accusation = _accusation(data.get("accusation", {}))
 	state.dialogues = (data.get("dialogues", {}) as Dictionary).duplicate(true)
@@ -126,6 +130,16 @@ static func _heard_list(value: Variant) -> Array[Dictionary]:
 				"form": str(body.get("form", "")),
 				"turn": int(body.get("turn", 0)),
 			})
+	return result
+
+
+static func _event_list(value: Variant) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	if value is not Array:
+		return result
+	for item in value:
+		if item is Dictionary:
+			result.append((item as Dictionary).duplicate(true))
 	return result
 
 

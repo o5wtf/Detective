@@ -3,6 +3,8 @@ extends Control
 const BUILTIN_CASE := "res://cases/rain_over_shadow.json"
 
 var _screen: Control = null
+var _place := "menu"
+var _exit: Control
 var _scale_factor := -1.0
 
 
@@ -13,7 +15,29 @@ func _ready() -> void:
 	get_window().size_changed.connect(_apply_content_scale)
 	_apply_content_scale()
 	_apply_theme()
+	_build_exit()
 	show_menu()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		handle_back()
+
+
+func handle_back() -> void:
+	if _exit != null and _exit.visible:
+		_exit.visible = false
+		return
+	if _screen != null and _screen.has_method("consume_back") and _screen.consume_back():
+		return
+	match _place:
+		"accusation":
+			show_investigation()
+		"settings", "briefing", "damaged", "investigation":
+			show_menu()
+		_:
+			if _exit != null:
+				_exit.visible = true
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -29,6 +53,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func show_menu() -> void:
+	_place = "menu"
 	var screen := preload("res://ui/screens/main_menu.tscn").instantiate()
 	_swap(screen)
 	screen.new_case_pressed.connect(_on_new_case)
@@ -39,6 +64,7 @@ func show_menu() -> void:
 
 
 func show_settings(explain_key: bool) -> void:
+	_place = "settings"
 	var screen := preload("res://ui/screens/settings.tscn").instantiate()
 	screen.explain_key = explain_key
 	screen.back_pressed.connect(show_menu)
@@ -47,12 +73,14 @@ func show_settings(explain_key: bool) -> void:
 
 
 func show_briefing() -> void:
+	_place = "briefing"
 	var screen := preload("res://ui/screens/briefing.tscn").instantiate()
 	screen.start_pressed.connect(show_investigation)
 	_swap(screen)
 
 
 func show_investigation() -> void:
+	_place = "investigation"
 	var screen := preload("res://ui/screens/investigation.tscn").instantiate()
 	screen.menu_pressed.connect(show_menu)
 	screen.accuse_pressed.connect(show_accusation)
@@ -60,6 +88,7 @@ func show_investigation() -> void:
 
 
 func show_accusation() -> void:
+	_place = "accusation"
 	var screen := preload("res://ui/screens/accusation.tscn").instantiate()
 	screen.menu_pressed.connect(show_menu)
 	screen.back_pressed.connect(show_investigation)
@@ -81,6 +110,7 @@ func _on_restart() -> void:
 
 
 func show_damaged(errors: Array) -> void:
+	_place = "damaged"
 	var screen := preload("res://ui/screens/damaged_case.tscn").instantiate()
 	screen.errors = errors
 	screen.back_pressed.connect(show_menu)
@@ -110,6 +140,27 @@ func _apply_content_scale() -> void:
 
 func _apply_theme() -> void:
 	theme = NoirTheme.make(SettingsStore.load_current().text_scale)
+
+
+func _build_exit() -> void:
+	_exit = PanelContainer.new()
+	_exit.name = "ExitConfirm"
+	_exit.visible = false
+	_exit.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_exit.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_exit)
+	var center := CenterContainer.new()
+	UiWidgets.fill(center)
+	_exit.add_child(center)
+	var box := VBoxContainer.new()
+	center.add_child(box)
+	box.add_child(UiWidgets.label(UiStrings.EXIT_TITLE, "ExitTitle"))
+	var yes := UiWidgets.button(UiStrings.EXIT_YES, "ExitYes")
+	yes.pressed.connect(func() -> void: get_tree().quit())
+	box.add_child(yes)
+	var no := UiWidgets.button(UiStrings.EXIT_NO, "ExitNo")
+	no.pressed.connect(func() -> void: _exit.visible = false)
+	box.add_child(no)
 
 
 func _swap(screen: Control) -> void:

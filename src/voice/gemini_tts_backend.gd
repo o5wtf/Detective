@@ -866,6 +866,16 @@ func _close_playback() -> void:
 		_player.stop()
 
 
+func suspend_playback() -> void:
+	if _player != null and is_instance_valid(_player) and _player.playing:
+		_player.stream_paused = true
+
+
+func resume_playback() -> void:
+	if _player != null and is_instance_valid(_player) and _player.stream_paused:
+		_player.stream_paused = false
+
+
 func _note_usage(model: String, usage: Variant) -> void:
 	if usage is not Dictionary:
 		return

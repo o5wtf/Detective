@@ -20,13 +20,16 @@ func needs_summary() -> bool:
 	return maxi(0, messages.size() - 6 - summarized_count) >= 6
 
 
-func append_message(role: String, text: String, turn: int, remark: String = "") -> void:
-	messages.append({
+func append_message(role: String, text: String, turn: int, remark: String = "", evidence_id: String = "") -> void:
+	var message := {
 		"role": role,
 		"text": text,
 		"remark": remark,
 		"turn": turn,
-	})
+	}
+	if evidence_id != "":
+		message["evidence_id"] = evidence_id
+	messages.append(message)
 
 
 func to_dict() -> Dictionary:

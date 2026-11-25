@@ -7,6 +7,9 @@ const CONTINUE := "Продолжить"
 const RESTART := "Начать заново"
 const SETTINGS := "Настройки"
 const BACK := "Назад"
+const EXIT_TITLE := "Выйти из игры?"
+const EXIT_YES := "Выйти"
+const EXIT_NO := "Остаться"
 const SAVE := "Сохранить"
 const START := "Начать расследование"
 const ACCUSE := "Обвинить"
@@ -210,6 +213,10 @@ static func present_hint(title: String) -> String:
 
 static func presented_line(title: String) -> String:
 	return "[предъявлена улика: %s]" % title
+
+
+static func shown_evidence(title: String) -> String:
+	return "Вы показали: %s" % title
 
 
 static func confront_line(title: String, quote: String) -> String:
