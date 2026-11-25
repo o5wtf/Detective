@@ -206,7 +206,7 @@ func _apply(result: Dictionary) -> void:
 		retry_visible.emit(true)
 		return
 	var text := str(result.get("text", "")).strip_edges()
-	if SpeechJunk.is_junk(text):
+	if _reject_transcript(text):
 		_finish_idle()
 		hint_changed.emit(GameLanguage.text("stt_repeat"))
 		return
@@ -222,6 +222,13 @@ func _apply(result: Dictionary) -> void:
 
 func _is_live() -> bool:
 	return stt != null and stt.has_method("listens_live") and stt.listens_live()
+
+
+func _reject_transcript(text: String) -> bool:
+	var hint := ""
+	if hint_source.is_valid():
+		hint = str(hint_source.call())
+	return SttGuard.reject(text, Game.case_data, Game.state, hint)
 
 
 func _apply_hint() -> void:

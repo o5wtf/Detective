@@ -341,7 +341,9 @@ func _turn(agent_id: String, player_text: String, event_note: String, evidence_i
 		_engine.set_emotion(agent_id, emotion)
 	dialogue = _rebind_dialogue(agent_id, dialogue)
 	accepted_player_line = player_text
-	dialogue.append_message("player", player_text, state.turn)
+	var marked := evidence_id if statement_id == "" else ""
+	dialogue.append_message("player", player_text, state.turn, "", marked)
+	_keep_feed_events(agent_id, turn_events)
 	dialogue.append_message("agent", reply, state.turn, remark)
 	if turn_model == "":
 		turn_model = str(result.get("model", ""))
@@ -531,9 +533,25 @@ func _reply_missing(result: Dictionary) -> bool:
 	return false
 
 
+func _keep_feed_events(agent_id: String, turn_events: Array) -> void:
+	for event in turn_events:
+		if event is not Dictionary:
+			continue
+		var type_name := str((event as Dictionary).get("type", ""))
+		if type_name != "evidence_unlocked" and type_name != "lie_broken" and type_name != "contradiction_registered":
+			continue
+		var row := (event as Dictionary).duplicate(true)
+		row["agent_id"] = agent_id if str(row.get("agent_id", "")) == "" else str(row.get("agent_id", ""))
+		row["turn"] = state.turn
+		state.feed_events.append(row)
+
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
+		Speaker.suspend_playback()
 		_save_for_suspend()
+	elif what == NOTIFICATION_APPLICATION_RESUMED:
+		Speaker.resume_playback()
 
 
 func _save_for_suspend() -> void:
@@ -667,6 +685,7 @@ func _restore(snapshot: Dictionary) -> void:
 	state.topic_touches = fresh.topic_touches
 	state.retold = fresh.retold
 	state.confrontations = fresh.confrontations
+	state.feed_events = fresh.feed_events
 	state.talked_to = fresh.talked_to
 	state.accusation = fresh.accusation
 	state.dialogues = fresh.dialogues

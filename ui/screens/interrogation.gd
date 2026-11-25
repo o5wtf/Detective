@@ -185,8 +185,8 @@ func _ready() -> void:
 		Speaker.voice_error.connect(_on_voice_settled)
 	if not Speaker.voice_retry_available.is_connected(_on_retry_gate):
 		Speaker.voice_retry_available.connect(_on_retry_gate)
-	if not Speaker.voice_line_changed.is_connected(_render_feed):
-		Speaker.voice_line_changed.connect(_render_feed)
+	if not Speaker.voice_line_changed.is_connected(_sync_skip):
+		Speaker.voice_line_changed.connect(_sync_skip)
 	if not Game.agent_replied.is_connected(_on_replied):
 		Game.agent_replied.connect(_on_replied)
 		Game.events.connect(_on_events)
@@ -315,6 +315,7 @@ func open_agent(next_id: String) -> void:
 		Speaker.speak_greeting(next_id, greeting)
 	if not _feeds.has(next_id):
 		_feeds[next_id] = _saved_lines(next_id)
+	_clear_error()
 	_render_header()
 	_render_feed()
 	_sync_voice_retry()
@@ -324,25 +325,69 @@ func _saved_lines(id: String) -> Array:
 	var lines: Array = []
 	if Game.state == null:
 		return lines
+	var pending_events: Array[Dictionary] = []
+	var pending_confronts: Array[Dictionary] = []
+	for event in Game.state.feed_events:
+		pending_events.append((event as Dictionary).duplicate(true))
+	for item in Game.state.confrontations:
+		pending_confronts.append((item as Dictionary).duplicate(true))
 	var saved: Variant = Game.state.dialogues.get(id, {})
-	if saved is not Dictionary:
-		return lines
-	var messages: Variant = (saved as Dictionary).get("messages", [])
-	if messages is not Array:
-		return lines
-	for message in messages:
-		if message is not Dictionary:
-			continue
-		var role := str((message as Dictionary).get("role", ""))
-		if role == "player":
-			lines.append({"kind": "player", "text": str((message as Dictionary).get("text", ""))})
-		elif role == "agent":
-			lines.append({
-				"kind": "agent",
-				"text": str((message as Dictionary).get("text", "")),
-				"remark": str((message as Dictionary).get("remark", "")),
-			})
+	var messages: Variant = []
+	if saved is Dictionary:
+		messages = (saved as Dictionary).get("messages", [])
+	if messages is Array:
+		for message in messages:
+			if message is not Dictionary:
+				continue
+			var role := str((message as Dictionary).get("role", ""))
+			var turn := int((message as Dictionary).get("turn", 0))
+			if role == "player":
+				var evidence_id := str((message as Dictionary).get("evidence_id", ""))
+				var spoken := str((message as Dictionary).get("text", ""))
+				if evidence_id != "":
+					lines.append({"kind": "system", "text": UiStrings.shown_evidence(_evidence_title(evidence_id))})
+				if evidence_id == "" or (spoken != "" and spoken != "Что скажете?"):
+					lines.append({"kind": "player", "text": spoken})
+			elif role == "agent":
+				lines.append({
+					"kind": "agent",
+					"text": str((message as Dictionary).get("text", "")),
+					"remark": str((message as Dictionary).get("remark", "")),
+				})
+				_take_saved(lines, id, turn, pending_events, pending_confronts)
+	_take_saved(lines, id, 1 << 30, pending_events, pending_confronts)
 	return lines
+
+
+func _take_saved(lines: Array, id: String, turn: int, pending_events: Array[Dictionary], pending_confronts: Array[Dictionary]) -> void:
+	var rest_events: Array[Dictionary] = []
+	for event in pending_events:
+		if str(event.get("agent_id", "")) != id or int(event.get("turn", 0)) > turn:
+			rest_events.append(event)
+			continue
+		var text := _event_line(event)
+		if text != "":
+			lines.append({"kind": "system", "text": text})
+	pending_events.clear()
+	pending_events.append_array(rest_events)
+	var rest_confronts: Array[Dictionary] = []
+	for item in pending_confronts:
+		if str(item.get("agent_id", "")) != id or int(item.get("turn", 0)) > turn:
+			rest_confronts.append(item)
+			continue
+		var title := _evidence_title(str(item.get("evidence_id", "")))
+		var quote := Game._statement_text(str(item.get("statement_id", "")))
+		var verdict := UiStrings.player_verdict(str(item.get("verdict", "")))
+		lines.append({"kind": "system", "text": "Вы %s — %s" % [UiStrings.confront_line(title, quote), verdict]})
+	pending_confronts.clear()
+	pending_confronts.append_array(rest_confronts)
+
+
+func consume_back() -> bool:
+	if _hint != null and _hint.visible:
+		_hide_hint()
+		return true
+	return false
 
 
 func set_back_visible(show_back: bool) -> void:
@@ -394,7 +439,7 @@ func _send_text(text: String) -> void:
 		_voice_gate = true
 		_heard_speech = false
 		_apply_voice_gate()
-		_last = {"kind": "ask", "text": "", "wav": wav, "agent_id": agent_id}
+		_remember({"kind": "ask", "text": "", "wav": wav})
 		await Game.ask(agent_id, "", wav)
 		_release_voice_gate()
 		return
@@ -406,7 +451,7 @@ func _send_text(text: String) -> void:
 	_voice_gate = true
 	_heard_speech = false
 	_apply_voice_gate()
-	_last = {"kind": "ask", "text": spoken, "agent_id": agent_id}
+	_remember({"kind": "ask", "text": spoken})
 	_push({"kind": "player", "text": spoken})
 	TurnTiming.mark("line_shown")
 	await Game.ask(agent_id, spoken)
@@ -628,14 +673,13 @@ func _send_confront(text: String, wav: PackedByteArray = PackedByteArray()) -> v
 	_voice_gate = true
 	_heard_speech = false
 	_apply_voice_gate()
-	_last = {
+	_remember({
 		"kind": "confront",
 		"text": text.strip_edges(),
 		"wav": wav,
 		"statement_id": statement_id,
 		"evidence_id": evidence_id,
-		"agent_id": agent_id,
-	}
+	})
 	var quote := _statement_quote(statement_id)
 	var title := _evidence_title(evidence_id)
 	_push({"kind": "player", "text": UiStrings.confront_line(title, quote)})
@@ -661,7 +705,10 @@ func _push_verdict(who: String, statement_id: String, evidence_id: String) -> vo
 				var fact: CaseData.Fact = Game.case_data.fact_by_id.get(str(fact_id)) as CaseData.Fact
 				names.append(fact.lie_text if fact != null and fact.lie_text != "" else str(fact_id))
 			line = "%s. %s" % [label, UiStrings.also_broken(", ".join(names))]
-		_push_to(who, {"kind": "system", "text": line})
+		if who == agent_id:
+			_push({"kind": "system", "text": line})
+		else:
+			_push_to(who, {"kind": "system", "text": line})
 		return
 
 
@@ -682,7 +729,7 @@ func _confirm_from_board(evidence_id: String) -> void:
 	_voice_gate = true
 	_heard_speech = false
 	_apply_voice_gate()
-	_last = {"kind": "present", "text": "", "evidence_id": evidence_id, "agent_id": agent_id}
+	_remember({"kind": "present", "text": "", "evidence_id": evidence_id})
 	_push({"kind": "system", "text": "Вы: %s" % UiStrings.presented_line(_evidence_title(evidence_id))})
 	await Game.present(agent_id, evidence_id, "")
 	_release_voice_gate()
@@ -701,10 +748,14 @@ func _confirm_hint() -> void:
 	_prompt.text = ""
 	_hide_hint()
 	_clear_error()
-	_last = {"kind": "present", "text": text, "evidence_id": evidence_id, "agent_id": agent_id}
+	_voice_gate = true
+	_heard_speech = false
+	_apply_voice_gate()
+	_remember({"kind": "present", "text": text, "evidence_id": evidence_id})
 	var title := _evidence_title(evidence_id)
 	_push({"kind": "system", "text": "Вы: %s" % UiStrings.presented_line(title)})
 	await Game.present(agent_id, evidence_id, text)
+	_release_voice_gate()
 
 
 func _retry_last() -> void:
@@ -783,11 +834,11 @@ func _on_events(list: Array) -> void:
 
 
 func _on_error(kind: String, message: String) -> void:
-	_pop_player_line()
+	_pop_turn_lines()
 	var text := message.strip_edges()
 	if kind == "offline" or kind == "timeout" or text == UiStrings.NO_LINK:
 		var held: PackedByteArray = _last.get("wav", PackedByteArray()) if _last.get("wav") is PackedByteArray else PackedByteArray()
-		if str(_last.get("kind", "")) == "ask" and _prompt != null and held.is_empty():
+		if str(_last.get("kind", "")) == "ask" and _prompt != null and held.is_empty() and str(_last.get("agent_id", agent_id)) == agent_id:
 			_prompt.text = str(_last.get("text", ""))
 		text = UiStrings.NO_LINK
 	elif text == "":
@@ -844,12 +895,20 @@ func _feed_has_player(who: String, text: String) -> bool:
 	return false
 
 
+func _remember(payload: Dictionary) -> void:
+	var rows: Array = _feeds.get(agent_id, [])
+	payload["feed_size"] = rows.size()
+	payload["agent_id"] = agent_id
+	_last = payload
+
+
 func _push(line: Dictionary) -> void:
+	var follow := _at_bottom()
 	_push_to(agent_id, line)
-	if line.get("kind") != "player":
-		_render_feed()
-	else:
-		_render_feed()
+	_append_row(line)
+	_sync_skip()
+	if follow:
+		call_deferred("_scroll_down")
 
 
 func _push_to(owner: String, line: Dictionary) -> void:
@@ -860,15 +919,15 @@ func _push_to(owner: String, line: Dictionary) -> void:
 	(_feeds[owner] as Array).append(line)
 
 
-func _pop_player_line() -> void:
-	if not _feeds.has(agent_id):
+func _pop_turn_lines() -> void:
+	var who := str(_last.get("agent_id", agent_id))
+	if not _feeds.has(who):
 		return
-	var rows: Array = _feeds[agent_id]
-	if rows.is_empty():
-		return
-	var last: Dictionary = rows[rows.size() - 1]
-	if str(last.get("kind", "")) == "player":
+	var rows: Array = _feeds[who]
+	var keep := int(_last.get("feed_size", rows.size()))
+	while rows.size() > keep:
 		rows.pop_back()
+	if who == agent_id:
 		_render_feed()
 
 
@@ -876,38 +935,78 @@ func _render_feed() -> void:
 	if _feed_box == null:
 		return
 	for child in _feed_box.get_children():
-		child.queue_free()
+		_feed_box.remove_child(child)
+		child.free()
 	var rows: Array = _feeds.get(agent_id, [])
-	var last_agent := -1
-	for index in rows.size():
-		if str(rows[index].get("kind", "")) == "agent":
-			last_agent = index
-	for index in rows.size():
-		var row: Dictionary = rows[index]
-		var kind := str(row.get("kind", ""))
-		if kind == "player":
-			_feed_box.add_child(UiWidgets.label("Вы: %s" % str(row.get("text", ""))))
-		elif kind == "agent":
-			var agent: CaseData.Agent = Game.case_data.agent_by_id.get(agent_id) as CaseData.Agent
-			var name := agent.name if agent != null else ""
-			var shown := VocalTags.visible(str(row.get("text", "")))
-			_feed_box.add_child(UiWidgets.label("%s: %s" % [name, shown]))
-			if index == last_agent and Speaker.can_skip():
-				var skip := UiWidgets.button(UiStrings.VOICE_SKIP, "SkipSpeechButton")
-				skip.pressed.connect(func() -> void: Speaker.skip_current())
-				_feed_box.add_child(skip)
-			var remark := str(row.get("remark", ""))
-			if remark != "":
-				var note := UiWidgets.label("(%s)" % remark)
-				note.add_theme_font_override("font", NoirTheme.italic())
-				note.add_theme_color_override("font_color", NoirTheme.MUTED)
-				_feed_box.add_child(note)
-		else:
-			var system := UiWidgets.label(str(row.get("text", "")))
-			system.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			system.add_theme_color_override("font_color", NoirTheme.GOLD)
-			_feed_box.add_child(system)
+	for row in rows:
+		if row is Dictionary:
+			_append_row(row)
+	_sync_skip()
 	call_deferred("_scroll_down")
+
+
+func _append_row(row: Dictionary) -> void:
+	if _feed_box == null:
+		return
+	var kind := str(row.get("kind", ""))
+	if kind == "player":
+		_feed_box.add_child(UiWidgets.label("Вы: %s" % str(row.get("text", ""))))
+	elif kind == "agent":
+		var agent: CaseData.Agent = Game.case_data.agent_by_id.get(agent_id) as CaseData.Agent
+		var name := agent.name if agent != null else ""
+		var shown := VocalTags.visible(str(row.get("text", "")))
+		_feed_box.add_child(UiWidgets.label("%s: %s" % [name, shown]))
+		var remark := str(row.get("remark", ""))
+		if remark != "":
+			var note := UiWidgets.label("(%s)" % remark)
+			note.add_theme_font_override("font", NoirTheme.italic())
+			note.add_theme_color_override("font_color", NoirTheme.MUTED)
+			_feed_box.add_child(note)
+	else:
+		var system := UiWidgets.label(str(row.get("text", "")))
+		system.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		system.add_theme_color_override("font_color", NoirTheme.GOLD)
+		_feed_box.add_child(system)
+
+
+func _sync_skip() -> void:
+	if _feed_box == null:
+		return
+	var button := _feed_box.get_node_or_null("SkipSpeechButton") as Button
+	if not Speaker.can_skip():
+		if button != null:
+			button.queue_free()
+		return
+	if button == null:
+		button = UiWidgets.button(UiStrings.VOICE_SKIP, "SkipSpeechButton")
+		button.pressed.connect(func() -> void: Speaker.skip_current())
+		_feed_box.add_child(button)
+	var after := _feed_box.get_child_count() - 1
+	for index in _feed_box.get_child_count():
+		var child := _feed_box.get_child(index)
+		if child == button:
+			continue
+		if child is Label and str((child as Label).text).begins_with(_agent_prefix()):
+			after = index
+	if button.get_index() != after + 1 and after + 1 < _feed_box.get_child_count():
+		_feed_box.move_child(button, after + 1)
+
+
+func _agent_prefix() -> String:
+	if Game.case_data == null:
+		return ""
+	var agent: CaseData.Agent = Game.case_data.agent_by_id.get(agent_id) as CaseData.Agent
+	if agent == null:
+		return ""
+	return "%s: " % agent.name
+
+
+func _at_bottom() -> bool:
+	if _scroll == null:
+		return true
+	var bar := _scroll.get_v_scroll_bar()
+	var room := bar.max_value - _scroll.size.y
+	return _scroll.scroll_vertical >= room - 24.0
 
 
 func _scroll_down() -> void:

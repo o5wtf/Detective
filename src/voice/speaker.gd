@@ -154,6 +154,16 @@ func retry_failed() -> void:
 		_pump()
 
 
+func suspend_playback() -> void:
+	if backend != null and backend.has_method("suspend_playback"):
+		backend.suspend_playback()
+
+
+func resume_playback() -> void:
+	if backend != null and backend.has_method("resume_playback"):
+		backend.resume_playback()
+
+
 func stop_and_clear(cancel_prefetch: bool = true) -> void:
 	if cancel_prefetch:
 		_prefetch_token += 1
