@@ -96,7 +96,10 @@ func test_term_in_stt_still_uses_the_stt_line() -> void:
 	stt.text = "Покажи записку."
 	Game.fallback_stt = stt
 	await Game.ask("a", "", PackedByteArray([9, 9, 9, 9]))
-	assert_eq(Game.accepted_player_line, "Покажи записку.")
+	assert_eq((Game._dialogues["a"] as DialogueState).messages.size(), 0)
+	assert_eq(mock.calls.size(), 1)
+	assert_eq(stt.calls, 1)
+	assert_eq(str(Game.last_turn_stats.get("fallback", "")), "junk")
 	_restore_settings()
 	Game.fallback_stt = null
 	stt.free()

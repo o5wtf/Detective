@@ -81,6 +81,8 @@ class Agent:
 	var own_version: String = ""
 	var life_details: String = ""
 	var sample_lines: Array[String] = []
+	## До трёх коротких междометий. Пусто — стандартные «Хм…», «Ну…», «Секунду…».
+	var filler_lines: Array[String] = []
 	var relationships: Dictionary = {}
 	var facts: Array[Fact] = []
 

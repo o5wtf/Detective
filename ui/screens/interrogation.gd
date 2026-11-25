@@ -192,6 +192,8 @@ func _ready() -> void:
 		Game.events.connect(_on_events)
 		Game.llm_error.connect(_on_error)
 		Game.busy_changed.connect(_on_busy)
+	if not Game.dialogue_sent.is_connected(_on_dialogue_sent):
+		Game.dialogue_sent.connect(_on_dialogue_sent)
 	if DisplayServer.get_name() != "headless":
 		await _warm_link()
 
@@ -440,6 +442,7 @@ func _send_text(text: String) -> void:
 		_heard_speech = false
 		_apply_voice_gate()
 		_remember({"kind": "ask", "text": "", "wav": wav})
+		_show_player_placeholder()
 		await Game.ask(agent_id, "", wav)
 		_release_voice_gate()
 		return
@@ -769,6 +772,8 @@ func _retry_last() -> void:
 	if str(_last.get("kind", "")) == "confront":
 		await Game.confront(who, str(_last.get("statement_id", "")), str(_last.get("evidence_id", "")), str(_last.get("text", "")), retry_wav)
 	elif not retry_wav.is_empty() and str(_last.get("text", "")) == "":
+		if who == agent_id:
+			_show_player_placeholder()
 		await Game.ask(who, "", retry_wav)
 	elif str(_last.get("kind", "")) == "present":
 		await Game.present(who, str(_last.get("evidence_id", "")), str(_last.get("text", "")))
@@ -809,9 +814,42 @@ func _hide_hint() -> void:
 	_hint.visible = false
 
 
+func _on_dialogue_sent(who: String) -> void:
+	if who == "":
+		return
+	Speaker.arm_filler(who)
+
+
+func _show_player_placeholder() -> void:
+	if _feed_has_player(agent_id, "…"):
+		return
+	_push({"kind": "player", "text": "…"})
+
+
+func _replace_placeholder(who: String, text: String) -> bool:
+	if not _feeds.has(who):
+		return false
+	var rows: Array = _feeds[who]
+	for index in range(rows.size() - 1, -1, -1):
+		var row: Dictionary = rows[index]
+		if str(row.get("kind", "")) == "player" and str(row.get("text", "")) == "…":
+			row["text"] = text
+			rows[index] = row
+			if who == agent_id and _feed_box != null:
+				for child in _feed_box.get_children():
+					if child is Label and str((child as Label).text) == "Вы: …":
+						(child as Label).text = "Вы: %s" % text
+						break
+			return true
+	return false
+
+
 func _on_replied(reply_agent: String, text: String, remark: String) -> void:
 	var spoken := Game.accepted_player_line.strip_edges()
-	if spoken != "" and not _feed_has_player(reply_agent, spoken):
+	if spoken != "" and _replace_placeholder(reply_agent, spoken):
+		if str(_last.get("agent_id", "")) == reply_agent and str(_last.get("text", "")) == "":
+			_last["text"] = spoken
+	elif spoken != "" and not _feed_has_player(reply_agent, spoken):
 		_push_to(reply_agent, {"kind": "player", "text": spoken})
 		if str(_last.get("agent_id", "")) == reply_agent and str(_last.get("text", "")) == "":
 			_last["text"] = spoken

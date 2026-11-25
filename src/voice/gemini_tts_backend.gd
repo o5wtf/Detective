@@ -52,6 +52,7 @@ var _cache_text: String = ""
 var _cache_voice: String = ""
 var _cache_style: String = ""
 var _capture_stored: bool = false
+var _filler_job: bool = false
 var _extra_chars: int = -1
 var _extra_chunks: int = 0
 var _chirp_queue: Array[PackedByteArray] = []
@@ -148,6 +149,40 @@ func prefetch(text: String, voice_hint: String = "", style: String = "") -> Stri
 		TtsCache.write(_cache_key(cache_text, cache_voice, cache_style, str(fetched.get("model", ""))), _capture)
 	_reset_audio()
 	return "stored"
+
+
+func capture_filler(text: String, voice: String, model: String) -> Dictionary:
+	var empty := PackedByteArray()
+	if _live or _filler_job:
+		return {"ok": false, "error": "busy", "pcm": empty}
+	if TtsQuota.is_chirp(model):
+		return {"ok": false, "error": "chirp", "pcm": empty}
+	var key := TtsCache.key_for(model, voice, "", text)
+	var cached := TtsCache.read(key)
+	if not cached.is_empty():
+		return {"ok": true, "error": "", "pcm": cached}
+	if limiter.delay_for(_now()) > 0.0:
+		return {"ok": false, "error": "limited", "pcm": empty}
+	limiter.mark(_now())
+	_filler_job = true
+	_capture = PackedByteArray()
+	_line_id = "filler"
+	var result: Dictionary = await _send(text, voice, "", model)
+	var pcm := _capture.duplicate()
+	_capture = PackedByteArray()
+	_line_id = ""
+	_filler_job = false
+	if not result.get("ok", false):
+		return {
+			"ok": false,
+			"error": str(result.get("error", "bad_response")),
+			"retry_after": float(result.get("retry_after", 1.0)),
+			"pcm": empty,
+		}
+	if pcm.is_empty():
+		return {"ok": false, "error": "no_audio", "pcm": empty}
+	TtsCache.write(key, pcm)
+	return {"ok": true, "error": "", "pcm": pcm}
 
 
 func stop() -> void:
@@ -607,7 +642,8 @@ func _send(text: String, voice_name: String, style: String, model: String) -> Di
 		"api_key": api_key,
 		"on_chunk": _push_pcm,
 	}
-	TurnTiming.mark("tts_sent")
+	if not _filler_job:
+		TurnTiming.mark("tts_sent")
 	_active_text = text
 	_active_voice = voice_name
 	_active_style = style
@@ -620,7 +656,7 @@ func _send(text: String, voice_name: String, style: String, model: String) -> Di
 
 
 func _process(_delta: float) -> void:
-	if _line_id == "" or _closed_line == _line_id:
+	if _filler_job or _line_id == "" or _closed_line == _line_id:
 		return
 	_feed()
 	if _chirp_busy or not _chirp_queue.is_empty():
@@ -630,6 +666,9 @@ func _process(_delta: float) -> void:
 
 
 func _on_transport_done(outcome: Dictionary) -> void:
+	if _filler_job:
+		_log_tts(outcome)
+		return
 	_log_tts(outcome)
 	if _closed_line == _line_id:
 		return
@@ -679,8 +718,12 @@ func _push_pcm(bytes: PackedByteArray) -> void:
 	if frames.is_empty():
 		return
 	_capture.append_array(ready)
+	if _filler_job:
+		return
 	_pending.append_array(frames)
 	TurnTiming.mark("first_audio")
+	if not _started_line and is_instance_valid(Speaker):
+		Speaker.stop_filler()
 	_maybe_open(false)
 	_feed()
 
