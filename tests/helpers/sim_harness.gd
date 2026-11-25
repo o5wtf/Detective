@@ -7,6 +7,11 @@ extends RefCounted
 
 
 static func run(case_data: CaseData, tone: int) -> Dictionary:
+	var engine := settle(case_data, tone)
+	return snapshot(case_data, engine.state, tone)
+
+
+static func settle(case_data: CaseData, tone: int) -> RulesEngine:
 	var state := GameState.new()
 	var engine := RulesEngine.new(case_data, state)
 	engine._seed_agents()
@@ -30,7 +35,7 @@ static func run(case_data: CaseData, tone: int) -> Dictionary:
 		engine.pass_contradictions()
 		if engine.simulation_signature() == before:
 			break
-	return snapshot(case_data, state, tone)
+	return engine
 
 
 static func _assume_mentions(case_data: CaseData, state: GameState) -> void:

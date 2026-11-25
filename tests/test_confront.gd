@@ -227,6 +227,18 @@ func test_builtin_case_is_solvable_and_four_lies_stay() -> void:
 		for fact_id in ["fact_mira_viktor", "fact_pavel_side", "fact_alina_affair", "fact_roman_grudge"]:
 			assert_eq(str(snap["fact_levels"][fact_id]), "lie", fact_id)
 			assert_false(broken.has(fact_id))
+	var settled := SimHarness.settle(loaded.case_data, 0)
+	var retell_sets := 0
+	for agent in settled.case_data.agents:
+		for fact in agent.facts:
+			if not fact.is_lie:
+				continue
+			for items in BreakSets.sets_of(settled.case_data, fact):
+				if items is not Array or not _has_retell(items):
+					continue
+				retell_sets += 1
+				assert_true(BreakSets.set_met(settled.case_data, settled.state, fact, items), fact.id)
+	assert_true(retell_sets > 0)
 	var bare: Dictionary = _read(REAL_CASE)
 	bare["agents"][1]["facts"][0]["breaks_with"] = []
 	bare["agents"][1]["facts"][0]["lie_type"] = "must_lie"
@@ -290,6 +302,13 @@ func _lie(data: CaseData, agent_id: String, fact_id: String) -> CaseData.Fact:
 	data.fact_by_id[fact_id] = fact
 	data.fact_owner[fact_id] = agent_id
 	return fact
+
+
+func _has_retell(items: Array) -> bool:
+	for item in items:
+		if item is Dictionary and str((item as Dictionary).get("type", "")) == "testimony_retold":
+			return true
+	return false
 
 
 func _count(items: Array, fact_id: String) -> int:

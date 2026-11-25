@@ -385,8 +385,18 @@ func begin_confront(statement_id: String, evidence_id: String) -> void:
 func _send_text(text: String) -> void:
 	if _busy or agent_id == "":
 		return
+	var wav := _take_pending_wav()
 	if _confront_statement != "":
-		await _send_confront(text)
+		await _send_confront(text, wav)
+		return
+	if not wav.is_empty():
+		_clear_error()
+		_voice_gate = true
+		_heard_speech = false
+		_apply_voice_gate()
+		_last = {"kind": "ask", "text": "", "wav": wav, "agent_id": agent_id}
+		await Game.ask(agent_id, "", wav)
+		_release_voice_gate()
 		return
 	var spoken := text.strip_edges()
 	if spoken == "":
@@ -596,7 +606,19 @@ func _on_mic_level(unit: float) -> void:
 	_meter.push(unit)
 
 
-func _send_confront(text: String) -> void:
+func _take_pending_wav() -> PackedByteArray:
+	if _talk != null and not _talk.pending_wav.is_empty():
+		var wav := _talk.pending_wav
+		_talk.pending_wav = PackedByteArray()
+		return wav
+	if _hands != null and not _hands.pending_wav.is_empty():
+		var wav := _hands.pending_wav
+		_hands.pending_wav = PackedByteArray()
+		return wav
+	return PackedByteArray()
+
+
+func _send_confront(text: String, wav: PackedByteArray = PackedByteArray()) -> void:
 	var statement_id := _confront_statement
 	var evidence_id := _confront_evidence
 	_confront_statement = ""
@@ -609,6 +631,7 @@ func _send_confront(text: String) -> void:
 	_last = {
 		"kind": "confront",
 		"text": text.strip_edges(),
+		"wav": wav,
 		"statement_id": statement_id,
 		"evidence_id": evidence_id,
 		"agent_id": agent_id,
@@ -616,7 +639,7 @@ func _send_confront(text: String) -> void:
 	var quote := _statement_quote(statement_id)
 	var title := _evidence_title(evidence_id)
 	_push({"kind": "player", "text": UiStrings.confront_line(title, quote)})
-	await Game.confront(agent_id, statement_id, evidence_id, text)
+	await Game.confront(agent_id, statement_id, evidence_id, text, wav)
 	_push_verdict(agent_id, statement_id, evidence_id)
 	_release_voice_gate()
 
@@ -691,8 +714,11 @@ func _retry_last() -> void:
 	var who := str(_last.get("agent_id", agent_id))
 	if who == "":
 		who = agent_id
+	var retry_wav: PackedByteArray = _last.get("wav", PackedByteArray()) if _last.get("wav") is PackedByteArray else PackedByteArray()
 	if str(_last.get("kind", "")) == "confront":
-		await Game.confront(who, str(_last.get("statement_id", "")), str(_last.get("evidence_id", "")), str(_last.get("text", "")))
+		await Game.confront(who, str(_last.get("statement_id", "")), str(_last.get("evidence_id", "")), str(_last.get("text", "")), retry_wav)
+	elif not retry_wav.is_empty() and str(_last.get("text", "")) == "":
+		await Game.ask(who, "", retry_wav)
 	elif str(_last.get("kind", "")) == "present":
 		await Game.present(who, str(_last.get("evidence_id", "")), str(_last.get("text", "")))
 	else:
@@ -733,6 +759,11 @@ func _hide_hint() -> void:
 
 
 func _on_replied(reply_agent: String, text: String, remark: String) -> void:
+	var spoken := Game.accepted_player_line.strip_edges()
+	if spoken != "" and not _feed_has_player(reply_agent, spoken):
+		_push_to(reply_agent, {"kind": "player", "text": spoken})
+		if str(_last.get("agent_id", "")) == reply_agent and str(_last.get("text", "")) == "":
+			_last["text"] = spoken
 	if reply_agent != agent_id:
 		_push_to(reply_agent, {"kind": "agent", "text": text, "remark": remark})
 		return
@@ -755,7 +786,8 @@ func _on_error(kind: String, message: String) -> void:
 	_pop_player_line()
 	var text := message.strip_edges()
 	if kind == "offline" or kind == "timeout" or text == UiStrings.NO_LINK:
-		if str(_last.get("kind", "")) == "ask" and _prompt != null:
+		var held: PackedByteArray = _last.get("wav", PackedByteArray()) if _last.get("wav") is PackedByteArray else PackedByteArray()
+		if str(_last.get("kind", "")) == "ask" and _prompt != null and held.is_empty():
 			_prompt.text = str(_last.get("text", ""))
 		text = UiStrings.NO_LINK
 	elif text == "":
@@ -802,6 +834,14 @@ func _event_line(event: Dictionary) -> String:
 			return ""
 		return UiStrings.lie_broken(agent.name)
 	return ""
+
+
+func _feed_has_player(who: String, text: String) -> bool:
+	var rows: Array = _feeds.get(who, [])
+	for row in rows:
+		if row is Dictionary and str((row as Dictionary).get("kind", "")) == "player" and str((row as Dictionary).get("text", "")) == text:
+			return true
+	return false
 
 
 func _push(line: Dictionary) -> void:

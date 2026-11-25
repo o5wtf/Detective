@@ -22,6 +22,7 @@ var output_lock: bool = false
 var locked: bool = false
 var state_name: String = STATE_LISTEN
 var submit: Callable = Callable()
+var pending_wav: PackedByteArray = PackedByteArray()
 var hint_source: Callable = Callable()
 var vad: PhraseVad = PhraseVad.new()
 var _generation: int = 0
@@ -104,6 +105,15 @@ func _recognize(pcm: PackedByteArray) -> void:
 	TurnTiming.begin(_backend_name())
 	_apply_hint()
 	var wav := VoiceAudio.wav_bytes(VoiceAudio.normalize_speech(pcm), PhraseVad.RATE)
+	if SettingsStore.wants_merged_stt():
+		pending_wav = wav
+		if submit.is_valid():
+			await submit.call("")
+		pending_wav = PackedByteArray()
+		if token == _generation:
+			locked = false
+			_set_state(_idle_state())
+		return
 	var result := {"ok": false, "text": "", "error": "offline"}
 	if stt != null:
 		result = await stt.transcribe(wav)

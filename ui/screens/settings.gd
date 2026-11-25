@@ -14,6 +14,7 @@ var _mock: CheckBox
 var _timing: CheckBox
 var _developer: CheckBox
 var _profanity: CheckBox
+var _merged: CheckBox
 var _voice: CheckBox
 var _intonation: CheckBox
 var _engine: OptionButton
@@ -179,6 +180,12 @@ func _ready() -> void:
 	_mic.text = UiStrings.MIC_ENABLED
 	_mic.custom_minimum_size = Vector2(0, 48)
 	scroll_box.add_child(_mic)
+	_merged = CheckBox.new()
+	_merged.name = "MergedStt"
+	_merged.text = GameLanguage.text("merged_label")
+	_merged.custom_minimum_size = Vector2(0, 48)
+	_merged.toggled.connect(_on_merged_toggled)
+	scroll_box.add_child(_merged)
 	scroll_box.add_child(UiWidgets.label(UiStrings.MIC_MODE))
 	_mic_mode = OptionButton.new()
 	_mic_mode.name = "MicMode"
@@ -303,6 +310,8 @@ func _load_fields() -> void:
 	_timing.button_pressed = store.timing_debug
 	_developer.button_pressed = store.developer
 	_profanity.button_pressed = store.profanity
+	_merged.button_pressed = store.mic_merged
+	_merged.visible = store.developer
 
 
 func _stt_value() -> String:
@@ -384,7 +393,15 @@ func _on_profanity_toggled(pressed: bool) -> void:
 	SettingsStore.save_value("dialogue", "profanity", pressed)
 
 
+func _on_merged_toggled(pressed: bool) -> void:
+	if _loading:
+		return
+	SettingsStore.save_value("mic", "merged", pressed)
+
+
 func _on_developer_toggled(pressed: bool) -> void:
+	if _merged != null:
+		_merged.visible = pressed
 	if _loading:
 		return
 	var previous := SettingsStore.load_current()

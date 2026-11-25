@@ -19,13 +19,15 @@ static func request_line(fields: Dictionary) -> String:
 
 
 static func turn_line(ms: int, model: String, tally: Dictionary) -> String:
-	return "llm timing ask_to_text_ms=%d model=%s requests=%d summary=%d regen=%d reasons=%s" % [
+	return "llm timing ask_to_text_ms=%d model=%s requests=%d summary=%d regen=%d reasons=%s merged=%s fallback=%s" % [
 		ms,
 		model,
 		int(tally.get("requests", 0)),
 		int(tally.get("summary", 0)),
 		int(tally.get("regen", 0)),
 		reasons_text(tally),
+		str(tally.get("merged", "no")),
+		str(tally.get("fallback", "keyboard")),
 	]
 
 

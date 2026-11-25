@@ -22,6 +22,11 @@ var speech_style: String = ""
 ## Текст для синтеза. На экране и в истории остаётся ответ без меток.
 var speech_line: String = ""
 var is_busy: bool = false
+## Текст игрока, который ход принял. Лента берёт его не раньше ответа.
+var accepted_player_line: String = ""
+## Подмена распознавания для запасного пути. Пусто — облачный STT.
+var fallback_stt: SttBackend = null
+const MODEL_CAP := 5
 var _turn_token: int = 0
 ## Снимок партии до present_evidence / note_question. Пока ход не закончен, сворачивание пишет его.
 var _turn_snapshot: Dictionary = {}
@@ -64,32 +69,32 @@ func mentioned_evidence(text: String) -> Array[String]:
 	return EvidenceMatcher.find_mentioned(text, open)
 
 
-func ask(agent_id: String, player_text: String) -> void:
+func ask(agent_id: String, player_text: String, wav: PackedByteArray = PackedByteArray()) -> void:
 	if is_busy:
 		return
-	await _turn(agent_id, player_text, "", "")
+	await _turn(agent_id, player_text, "", "", "", wav)
 
 
-func confront(agent_id: String, statement_id: String, evidence_id: String, player_text: String = "") -> void:
+func confront(agent_id: String, statement_id: String, evidence_id: String, player_text: String = "", wav: PackedByteArray = PackedByteArray()) -> void:
 	if is_busy:
 		return
 	var question := player_text.strip_edges()
-	if question == "":
+	if question == "" and wav.is_empty():
 		question = "Что скажете?"
-	await _turn(agent_id, question, "", evidence_id, statement_id)
+	await _turn(agent_id, question, "", evidence_id, statement_id, wav)
 
 
-func present(agent_id: String, evidence_id: String, player_text: String = "") -> void:
+func present(agent_id: String, evidence_id: String, player_text: String = "", wav: PackedByteArray = PackedByteArray()) -> void:
 	if is_busy:
 		return
 	var question := player_text.strip_edges()
-	if question == "":
+	if question == "" and wav.is_empty():
 		question = "Что скажете?"
 	var note := ""
 	if case_data != null and case_data.evidence_by_id.has(evidence_id):
 		var evidence: CaseData.EvidenceItem = case_data.evidence_by_id[evidence_id]
 		note = "Следователь предъявляет улику «%s»: %s" % [evidence.title, evidence.full_text]
-	await _turn(agent_id, question, note, evidence_id)
+	await _turn(agent_id, question, note, evidence_id, "", wav)
 
 
 func accuse(killer_id: String, motive_id: String, method_id: String) -> Dictionary:
@@ -134,7 +139,7 @@ func add_greeting(agent_id: String) -> String:
 	return text
 
 
-func _turn(agent_id: String, player_text: String, event_note: String, evidence_id: String, statement_id: String = "") -> void:
+func _turn(agent_id: String, player_text: String, event_note: String, evidence_id: String, statement_id: String = "", wav: PackedByteArray = PackedByteArray()) -> void:
 	if is_busy:
 		return
 	if _engine == null or not _dialogues.has(agent_id):
@@ -146,6 +151,8 @@ func _turn(agent_id: String, player_text: String, event_note: String, evidence_i
 	var token := _turn_token
 	Speaker.cancel_inflight()
 	Speaker.dismiss_retry()
+	speech_style = ""
+	speech_line = ""
 	var turn_config := LLMConfig.load_settings()
 	var turn_started := Time.get_ticks_msec()
 	var tally := LlmTiming.empty_tally()
@@ -173,26 +180,82 @@ func _turn(agent_id: String, player_text: String, event_note: String, evidence_i
 	turn_events.append_array(_engine.note_question(agent_id))
 	var dialogue: DialogueState = _dialogues[agent_id]
 	var packet: Array = _engine.get_packet(agent_id)
-	var request := PromptBuilder.build_turn(case_data, state, agent_id, packet, dialogue, player_text, event_note)
+	var fallback := _route_reason(wav, evidence_id, statement_id)
+	tally["merged"] = "yes" if fallback == "" else "no"
+	tally["fallback"] = "none" if fallback == "" else fallback
+	var request := PromptBuilder.build_turn(case_data, state, agent_id, packet, dialogue, player_text, event_note, fallback == "")
 	var chain := 1
-	LlmTiming.note_request(tally, "reply", "reply")
-	TurnTiming.mark("dialogue_sent")
-	var result := await _generate(request)
-	TurnTiming.mark("dialogue_done")
-	if not _turn_current(token):
-		return
-	turn_model = str(result.get("model", turn_model))
-	if _is_network_error(result):
-		_abort_turn(snapshot, turn_started, turn_model, tally, str(result.get("error", "")), str(result.get("message", "")))
-		return
+	var result: Dictionary = {}
+	var keep_merged := false
+	if fallback == "":
+		request["wav"] = wav
+		if not _spend_model(tally, "reply", "merged"):
+			_abort_turn(snapshot, turn_started, turn_model, tally, "empty", UiStrings.REPHRASE)
+			return
+		TurnTiming.mark("dialogue_sent")
+		result = await _generate(request)
+		TurnTiming.mark("dialogue_done")
+		if not _turn_current(token):
+			return
+		turn_model = str(result.get("model", turn_model))
+		if _is_network_error(result):
+			fallback = "network"
+			tally["fallback"] = "network"
+			result = {}
+		else:
+			var heard := ""
+			if result.get("json") is Dictionary:
+				heard = str((result.get("json") as Dictionary).get("heard", ""))
+			if SpeechJunk.is_junk(heard):
+				tally["fallback"] = "junk"
+				_abort_turn(snapshot, turn_started, turn_model, tally, "empty", GameLanguage.text("stt_repeat"))
+				return
+			if HiddenTerms.mentioned(heard, HiddenTerms.build(case_data, state)):
+				fallback = "leak"
+				tally["fallback"] = "leak"
+				result = {}
+			else:
+				keep_merged = true
+				player_text = heard.strip_edges()
+				request = PromptBuilder.build_turn(case_data, state, agent_id, packet, dialogue, player_text, event_note)
+	if not keep_merged:
+		if not wav.is_empty() and (fallback == "network" or fallback == "leak" or fallback == "off"):
+			var transcript := await _fallback_transcript(wav, agent_id, tally)
+			if not _turn_current(token):
+				return
+			if str(transcript.get("error", "")) != "":
+				var kind := str(transcript.get("error", ""))
+				if kind == "cap":
+					_abort_turn(snapshot, turn_started, turn_model, tally, "empty", UiStrings.REPHRASE)
+				elif SpeechJunk.is_junk(str(transcript.get("text", ""))) or kind == "junk":
+					_abort_turn(snapshot, turn_started, turn_model, tally, "empty", GameLanguage.text("stt_repeat"))
+				else:
+					_abort_turn(snapshot, turn_started, turn_model, tally, kind, str(transcript.get("message", UiStrings.NO_LINK)))
+				return
+			player_text = str(transcript.get("text", "")).strip_edges()
+		request = PromptBuilder.build_turn(case_data, state, agent_id, packet, dialogue, player_text, event_note)
+		if not _spend_model(tally, "reply", "reply"):
+			_abort_turn(snapshot, turn_started, turn_model, tally, "empty", UiStrings.REPHRASE)
+			return
+		TurnTiming.mark("dialogue_sent")
+		result = await _generate(request)
+		TurnTiming.mark("dialogue_done")
+		if not _turn_current(token):
+			return
+		turn_model = str(result.get("model", turn_model))
+		if _is_network_error(result):
+			_abort_turn(snapshot, turn_started, turn_model, tally, str(result.get("error", "")), str(result.get("message", "")))
+			return
 	if _reply_missing(result):
 		if chain >= 2:
 			_abort_turn(snapshot, turn_started, turn_model, tally, "empty", UiStrings.REPHRASE)
 			return
 		chain += 1
 		var filler := "Отвечай сдержаннее, без откровенных подробностей." if str(result.get("error", "")) == "blocked" else "Ответь одной целой репликой."
-		LlmTiming.note_request(tally, "regen", "blocked" if str(result.get("error", "")) == "blocked" else "empty")
-		result = await _generate(_with_suffix(request, filler))
+		if not _spend_model(tally, "regen", "blocked" if str(result.get("error", "")) == "blocked" else "empty"):
+			_abort_turn(snapshot, turn_started, turn_model, tally, "empty", UiStrings.REPHRASE)
+			return
+		result = await _generate(_without_audio(request, filler))
 		if not _turn_current(token):
 			return
 		turn_model = str(result.get("model", turn_model))
@@ -209,8 +272,10 @@ func _turn(agent_id: String, player_text: String, event_note: String, evidence_i
 			_abort_turn(snapshot, turn_started, turn_model, tally, "bad_response", UiStrings.REPHRASE if _reply_missing(result) else "Целый ответ не принят.")
 			return
 		chain += 1
-		LlmTiming.note_request(tally, "regen", "validation")
-		result = await _generate(_with_suffix(request, ResponseValidator.repair_note(report["violations"])))
+		if not _spend_model(tally, "regen", "validation"):
+			_abort_turn(snapshot, turn_started, turn_model, tally, "empty", UiStrings.REPHRASE)
+			return
+		result = await _generate(_without_audio(request, ResponseValidator.repair_note(report["violations"])))
 		if not _turn_current(token):
 			return
 		turn_model = str(result.get("model", turn_model))
@@ -239,8 +304,10 @@ func _turn(agent_id: String, player_text: String, event_note: String, evidence_i
 		turn_events.append_array(_engine.commit_plan(agent_id, plan))
 		packet = _engine.get_packet(agent_id)
 		var restarted := PromptBuilder.build_turn(case_data, state, agent_id, packet, dialogue, player_text, event_note)
-		LlmTiming.note_request(tally, "regen", "admit")
-		result = await _generate(_with_suffix(restarted, _admit_note(plan)))
+		if not _spend_model(tally, "regen", "admit"):
+			_abort_turn(snapshot, turn_started, turn_model, tally, "empty", UiStrings.REPHRASE)
+			return
+		result = await _generate(_without_audio(restarted, _admit_note(plan)))
 		if not _turn_current(token):
 			return
 		turn_model = str(result.get("model", turn_model))
@@ -273,6 +340,7 @@ func _turn(agent_id: String, player_text: String, event_note: String, evidence_i
 	if Balance.emotion_allowed(emotion):
 		_engine.set_emotion(agent_id, emotion)
 	dialogue = _rebind_dialogue(agent_id, dialogue)
+	accepted_player_line = player_text
 	dialogue.append_message("player", player_text, state.turn)
 	dialogue.append_message("agent", reply, state.turn, remark)
 	if turn_model == "":
@@ -498,9 +566,61 @@ func _publish_turn_timing(elapsed: int, model: String, tally: Dictionary) -> voi
 		"summary": int(tally.get("summary", 0)),
 		"regen": int(tally.get("regen", 0)),
 		"reasons": LlmTiming.reasons_text(tally),
+		"merged": str(tally.get("merged", "no")),
+		"fallback": str(tally.get("fallback", "keyboard")),
+		"model_calls": int(tally.get("model_calls", 0)),
 	}
 	last_turn_line = LlmTiming.screen_line(elapsed, int(tally.get("requests", 0)), shown)
 	print(LlmTiming.turn_line(elapsed, shown, tally))
+
+
+func _route_reason(wav: PackedByteArray, evidence_id: String, statement_id: String) -> String:
+	if wav.is_empty():
+		if evidence_id != "" or statement_id != "":
+			return "present_text"
+		return "keyboard"
+	if SettingsStore.load_current().stt_backend == "parakeet":
+		return "parakeet"
+	if not SettingsStore.load_current().mic_merged:
+		return "off"
+	return ""
+
+
+func _spend_model(tally: Dictionary, kind: String, reason: String) -> bool:
+	if int(tally.get("model_calls", 0)) >= MODEL_CAP:
+		return false
+	tally["model_calls"] = int(tally.get("model_calls", 0)) + 1
+	LlmTiming.note_request(tally, kind, reason)
+	return true
+
+
+func _without_audio(request: Dictionary, suffix: String) -> Dictionary:
+	var copy := _with_suffix(request, suffix)
+	copy.erase("wav")
+	return copy
+
+
+func _fallback_transcript(wav: PackedByteArray, agent_id: String, tally: Dictionary) -> Dictionary:
+	if not _spend_model(tally, "reply", "stt"):
+		return {"text": "", "error": "cap", "message": ""}
+	var backend := fallback_stt
+	var owned := false
+	if backend == null:
+		var cloud := GeminiStt.new()
+		add_child(cloud)
+		backend = cloud
+		owned = true
+	if backend.has_method("set_hint"):
+		backend.set_hint(SttHint.for_turn("gemini", case_data, state, agent_id, ""))
+	var result: Dictionary = await backend.transcribe(wav)
+	if owned:
+		backend.queue_free()
+	var text := str(result.get("text", "")).strip_edges()
+	if not result.get("ok", false):
+		return {"text": "", "error": str(result.get("error", "offline")), "message": str(result.get("message", ""))}
+	if SpeechJunk.is_junk(text):
+		return {"text": "", "error": "junk", "message": ""}
+	return {"text": text, "error": "", "message": ""}
 
 
 func _generate(request: Dictionary) -> Dictionary:

@@ -22,6 +22,8 @@ var character_busy: bool = false
 var locked: bool = false
 var state_name: String = STATE_IDLE
 var last_wav: PackedByteArray = PackedByteArray()
+## Запись для одного запроса «речь + ответ». Пустая, если сначала идёт отдельное распознавание.
+var pending_wav: PackedByteArray = PackedByteArray()
 var submit: Callable = Callable()
 var hint_source: Callable = Callable()
 var _holding: bool = false
@@ -136,6 +138,17 @@ func _finish_clip(force_send: bool) -> Dictionary:
 	last_wav = VoiceAudio.wav_bytes(pcm, VoiceAudio.UPLOAD_RATE)
 	_save_last(last_wav)
 	TurnTiming.mark("audio_ready")
+	if SettingsStore.wants_merged_stt():
+		pending_wav = last_wav
+		locked = true
+		_set_state(STATE_ANSWERING)
+		if submit.is_valid():
+			await submit.call("")
+		pending_wav = PackedByteArray()
+		if _live(_generation):
+			_finish_idle()
+		decision["wav"] = last_wav
+		return decision
 	await _recognize(last_wav)
 	decision["wav"] = last_wav
 	return decision
