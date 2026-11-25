@@ -38,6 +38,12 @@ static func translate(fact: CaseData.Fact, contradictions: Array) -> Array:
 	return sets
 
 
+static func set_met(case_data: CaseData, state: GameState, fact: CaseData.Fact, items: Array) -> bool:
+	if items.is_empty():
+		return false
+	return Conditions.evaluate({"AND": items}, state, ctx_for(case_data, state, fact))
+
+
 static func holds(case_data: CaseData, state: GameState, fact: CaseData.Fact) -> bool:
 	var sets := sets_of(case_data, fact)
 	var arms: Array = []

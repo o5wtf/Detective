@@ -32,6 +32,8 @@ var mic_pause_ms: int = 700
 var developer: bool = false
 ## gemini | parakeet. system и неизвестное читаются как gemini.
 var stt_backend: String = "gemini"
+## Речь и ответ одним запросом. Пока только для разработчика.
+var mic_merged: bool = false
 ## Мат в репликах, если у персонажа sometimes или often.
 var profanity: bool = false
 
@@ -83,6 +85,10 @@ static func load_current() -> SettingsStore:
 		store.mic_pause_ms = clampi(int(file.get_value("mic", "pause_ms")), 400, 2000)
 	if loaded and file.has_section_key("llm", "developer"):
 		store.developer = bool(file.get_value("llm", "developer"))
+	var raw_merged: Variant = false
+	if loaded and file.has_section_key("mic", "merged"):
+		raw_merged = file.get_value("mic", "merged")
+	store.mic_merged = typeof(raw_merged) == TYPE_BOOL and raw_merged
 	var raw_profanity: Variant = false
 	if loaded and file.has_section_key("dialogue", "profanity"):
 		raw_profanity = file.get_value("dialogue", "profanity")
@@ -120,6 +126,7 @@ func detached() -> SettingsStore:
 	copy.mic_pause_ms = mic_pause_ms
 	copy.developer = developer
 	copy.stt_backend = stt_backend
+	copy.mic_merged = mic_merged
 	copy.profanity = profanity
 	return copy
 
@@ -132,6 +139,11 @@ static func _file_hash() -> String:
 
 static func canonical_engine(engine: String) -> String:
 	return "gemini" if engine.strip_edges() == "gemini" else "system"
+
+
+static func wants_merged_stt() -> bool:
+	var store := load_current()
+	return store.mic_merged and store.stt_backend != "parakeet"
 
 
 static func canonical_stt(backend: String) -> String:

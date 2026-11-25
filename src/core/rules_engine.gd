@@ -456,22 +456,6 @@ func _mark_shown(evidence_id: String, agent_id: String) -> void:
 	state.shown[evidence_id] = agents
 
 
-func _breaks_of(fact: CaseData.Fact) -> Array:
-	var value: Variant = fact.breaks_lie_on
-	if value == null:
-		return []
-	if value is String:
-		return [value]
-	if value is PackedStringArray:
-		var packed: Array = []
-		for item in value:
-			packed.append(str(item))
-		return packed
-	if value is Array:
-		return value
-	return []
-
-
 func _with_doubt(fact: CaseData.Fact, entry: Dictionary) -> Dictionary:
 	var report := BreakSets.doubt_report(case_data, state, fact)
 	if bool(report.get("active", false)):

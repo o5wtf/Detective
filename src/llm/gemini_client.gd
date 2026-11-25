@@ -255,9 +255,16 @@ func _body(request: Dictionary, schema_field: String, thinking_sent: String, rai
 	}
 	if thinking_sent != "" and thinking_sent != "off":
 		generation["thinkingConfig"] = {"thinkingLevel": thinking_sent}
+	var parts: Array = []
+	var wav: Variant = request.get("wav", PackedByteArray())
+	if wav is PackedByteArray and not (wav as PackedByteArray).is_empty():
+		parts.append({
+			"inlineData": {"mimeType": "audio/wav", "data": Marshalls.raw_to_base64(wav)},
+		})
+	parts.append({"text": str(request.get("user", ""))})
 	return {
 		"systemInstruction": {"parts": [{"text": str(request.get("system", ""))}]},
-		"contents": [{"role": "user", "parts": [{"text": str(request.get("user", ""))}]}],
+		"contents": [{"role": "user", "parts": parts}],
 		"generationConfig": generation,
 		"safetySettings": _safety_settings(),
 	}

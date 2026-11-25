@@ -30,17 +30,20 @@ static func build_turn(
 	packet: Array,
 	dialogue: DialogueState,
 	player_text: String,
-	event_note: String
+	event_note: String,
+	with_heard: bool = false
 ) -> Dictionary:
 	var agent: CaseData.Agent = case_data.agent_by_id[agent_id]
 	var evidence_keys := _evidence_keys(case_data, state)
 	var options := TurnOptions.build(case_data, state, agent_id)
 	var system := _system_prompt(case_data, agent)
 	var user := _turn_prompt(case_data, state, agent, packet, dialogue, player_text, event_note, evidence_keys, options)
+	if with_heard:
+		user = GameLanguage.text("heard_prompt") + "\n" + user
 	return {
 		"system": system,
 		"user": user,
-		"schema": _turn_schema(_packet_keys(packet), evidence_keys, options),
+		"schema": _turn_schema(_packet_keys(packet), evidence_keys, options, with_heard),
 		"model_role": "dialogue",
 		"temperature": 0.9,
 		"max_output_tokens": LLMConfig.REPLY_MAX_OUTPUT_TOKENS,
@@ -455,7 +458,7 @@ static func _enum_or_none(keys: PackedStringArray) -> Array:
 	return values
 
 
-static func _turn_schema(packet_keys: PackedStringArray, evidence_keys: PackedStringArray, options: Array) -> Dictionary:
+static func _turn_schema(packet_keys: PackedStringArray, evidence_keys: PackedStringArray, options: Array, with_heard: bool = false) -> Dictionary:
 	var emotion_enum: Array = []
 	for emotion in EMOTIONS:
 		emotion_enum.append(emotion)
@@ -500,6 +503,13 @@ static func _turn_schema(packet_keys: PackedStringArray, evidence_keys: PackedSt
 		}
 		required.push_front("chosen")
 		ordering.push_front("chosen")
+	if with_heard:
+		properties["heard"] = {
+			"type": "string",
+			"description": GameLanguage.text("heard_prompt"),
+		}
+		required.push_front("heard")
+		ordering.push_front("heard")
 	return {
 		"type": "object",
 		"properties": properties,
