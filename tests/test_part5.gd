@@ -62,8 +62,21 @@ func test_ask_warning_has_cancel_and_warnings_start_collapsed() -> void:
 	assert_true(cancel.size.y > 0.0)
 	assert_eq(cancel.text, "Отмена")
 	assert_true(text.text.contains("лимит API"))
+	_assert_dialog_card(warn, "SpendWarnCard")
+	var confirm := editor.find_child("ConfirmAsk", true, false) as Button
+	assert_true(confirm.is_visible_in_tree())
+	assert_true(confirm.size.y > 0.0)
 	cancel.pressed.emit()
 	assert_false(warn.visible)
+	var sandbox := editor.find_child("SandboxPanel", true, false) as Control
+	sandbox.visible = true
+	await _frame()
+	_assert_dialog_card(sandbox, "SandboxPanelCard")
+	for node_name in ["SandboxSend", "CloseSandbox", "SandboxQuestion"]:
+		var control := editor.find_child(node_name, true, false) as Control
+		assert_true(control.is_visible_in_tree(), node_name)
+		assert_true(control.size.y > 0.0, node_name)
+	sandbox.visible = false
 	var toggle := editor.find_child("ToggleWarnings", true, false) as Button
 	var body := editor.find_child("WarningsBody", true, false) as Control
 	assert_true(toggle.is_visible_in_tree())
@@ -126,6 +139,16 @@ func test_break_titles_ellipsis_topic_help_and_usage_plural() -> void:
 	var two := doc.usage_lines("fact", "fact_lie")
 	assert_true(two.size() >= 2)
 	assert_eq(phrase_host._places_phrase(two.size()), "Используется в %d местах" % two.size())
+
+
+func _assert_dialog_card(dialog: Control, card_name: String) -> void:
+	var dim := dialog.find_child("Dim", true, false) as ColorRect
+	assert_true(dim.color.a >= 0.5)
+	assert_true(dim.color.r < 0.2)
+	var card := dialog.find_child(card_name, true, false) as PanelContainer
+	var style := card.get_theme_stylebox("panel") as StyleBoxFlat
+	assert_eq(style.bg_color.a, 1.0)
+	assert_eq(style.bg_color, NoirTheme.PANEL)
 
 
 func _editor(raw: Dictionary) -> CaseEditor:

@@ -905,9 +905,44 @@ func _issue_row(issue: Dictionary) -> Control:
 	return row
 
 
+func _card_dialog(node_name: String) -> Control:
+	var root := Control.new()
+	root.name = node_name
+	root.visible = false
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	var dim := ColorRect.new()
+	dim.name = "Dim"
+	dim.color = Color(0, 0, 0, 0.72)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	UiWidgets.fill(dim)
+	root.add_child(dim)
+	var center := CenterContainer.new()
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiWidgets.fill(center)
+	root.add_child(center)
+	var card := PanelContainer.new()
+	card.name = "%sCard" % node_name
+	var style := StyleBoxFlat.new()
+	style.bg_color = NoirTheme.PANEL
+	style.border_color = NoirTheme.LINE
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(6)
+	style.content_margin_left = 16
+	style.content_margin_top = 16
+	style.content_margin_right = 16
+	style.content_margin_bottom = 16
+	card.add_theme_stylebox_override("panel", style)
+	center.add_child(card)
+	var box := VBoxContainer.new()
+	box.name = "%sBox" % node_name
+	card.add_child(box)
+	return root
+
+
 func _spend_popup() -> Control:
-	var panel := _overlay("SpendWarn")
-	var box := panel.get_child(0).get_child(0)
+	var panel := _card_dialog("SpendWarn")
+	var box := panel.find_child("SpendWarnBox", true, false) as VBoxContainer
 	var label := UiWidgets.label("Запрос к модели расходует лимит API. Ответ только текстом и не попадает в сохранение партии.", "SpendText")
 	label.custom_minimum_size = Vector2(420, 0)
 	box.add_child(label)
@@ -924,8 +959,8 @@ func _spend_popup() -> Control:
 
 
 func _sandbox_panel() -> Control:
-	var panel := _overlay("SandboxPanel")
-	var box := panel.get_child(0).get_child(0)
+	var panel := _card_dialog("SandboxPanel")
+	var box := panel.find_child("SandboxPanelBox", true, false) as VBoxContainer
 	box.custom_minimum_size = Vector2(420, 0)
 	box.add_child(UiWidgets.label("Как в начале дела. Ответы только текстом.", "SandboxNote"))
 	var question := LineEdit.new()
