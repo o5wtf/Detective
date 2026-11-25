@@ -96,6 +96,12 @@ jobs:
           echo "JAVA_HOME=$JAVA_HOME"
           echo "ANDROID_HOME=$ANDROID_HOME"
 
+      - name: Библиотека sherpa-onnx arm64
+        run: |
+          set -euo pipefail
+          python3 tools/fetch_sherpa_android.py --self-test
+          python3 tools/fetch_sherpa_android.py
+
       - name: Подпись Android и номер сборки
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -181,6 +187,7 @@ jobs:
             exit 1
           fi
           python3 tools/check_build.py builds/Detective.apk
+          python3 tools/check_sherpa_apk.py builds/Detective.apk
 
       - name: Артефакты
         uses: actions/upload-artifact@v4

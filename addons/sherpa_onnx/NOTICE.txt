@@ -1,0 +1,8 @@
+sherpa-onnx 2.0.3
+Copyright (c) 2022-2026 Xiaomi Corporation and the sherpa-onnx authors
+Apache License 2.0
+https://github.com/k2-fsa/sherpa-onnx/blob/v2.0.3/LICENSE
+
+The Android binaries are the official release asset sherpa-onnx-2.0.3.aar.
+This game does not ship the Parakeet weights. Those stay a separate download
+under CC-BY-4.0, pinned in ModelDownload.

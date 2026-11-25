@@ -13,6 +13,12 @@ mono_crash.*.json
 *.pck
 *.exe
 /android/
+/addons/sherpa_onnx/bin/*.aar
+/addons/sherpa_onnx/bin/*.jar
+/addons/sherpa_onnx/.cache/
+/addons/sherpa_onnx/android/.gradle/
+/addons/sherpa_onnx/android/build/
+/addons/sherpa_onnx/android/local.properties
 
 # Ключи и секреты — никогда не коммитить
 config/dev.cfg

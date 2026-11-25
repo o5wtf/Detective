@@ -323,6 +323,61 @@ func test_name_correction_keeps_ordinary_words_and_closed_evidence() -> void:
 	end_async()
 
 
+func test_hands_free_journal_uses_the_selected_backend() -> void:
+	var previous := _keep_config()
+	SettingsStore.save_values("mock", "", "gemini-3.5-flash-lite", 1.0, null, null, null, null, null, null, "parakeet")
+	var listen := HandsFreeListen.new()
+	assert_eq(listen._backend_name(), "parakeet")
+	SettingsStore.save_values("mock", "", "gemini-3.5-flash-lite", 1.0, null, null, null, null, null, null, "gemini")
+	assert_eq(listen._backend_name(), "gemini")
+	assert_false(SherpaNative.new().available())
+	listen.free()
+	_restore_config(previous)
+
+
+func test_background_load_stays_on_cloud_until_the_library_is_ready() -> void:
+	begin_async()
+	_use_test_dir()
+	_install_stubs()
+	var host: Window = (Engine.get_main_loop() as SceneTree).root
+	var cloud := _Cloud.new()
+	var local := LocalStt.new()
+	local.cloud = cloud
+	var slow := _SlowLoad.new()
+	local.native = slow
+	host.add_child(local)
+	local.prepare()
+	assert_eq(local.phase, "loading")
+	TurnTiming.begin("gemini")
+	var result: Dictionary = await local.transcribe(PackedByteArray())
+	assert_eq(cloud.calls, 1)
+	assert_true(_row().contains("stt_reason=loading"))
+	assert_false(_row().contains("облачная"))
+	for _index in 4:
+		await (Engine.get_main_loop() as SceneTree).process_frame
+	assert_eq(local.phase, "ready")
+	TurnTiming.begin("gemini")
+	result = await local.transcribe(PackedByteArray())
+	assert_true(bool(result["ok"]))
+	assert_eq(str(result["text"]), "готово")
+	var line := _row()
+	assert_true(line.contains("stt=parakeet"))
+	assert_true(line.contains("stt_load_ms="))
+	assert_false(line.contains("готово"))
+	slow.fail = "oom"
+	local.release_model()
+	local.prepare()
+	for _index in 4:
+		await (Engine.get_main_loop() as SceneTree).process_frame
+	assert_eq(local.phase, "failed")
+	assert_eq(LocalStt.last_reason, "load_failed")
+	local.free()
+	cloud.free()
+	_clear_test_dir()
+	TurnTiming.reset()
+	end_async()
+
+
 func _names() -> Array:
 	var case_data := CaseData.new()
 	var paula := CaseData.Agent.new()
@@ -406,6 +461,27 @@ class _Native:
 
 	func unload() -> void:
 		pass
+
+
+class _SlowLoad:
+	extends RefCounted
+	var polls: int = 0
+	var fail: String = ""
+
+	func load_model(_dir: String) -> String:
+		return "loading"
+
+	func load_state() -> String:
+		polls += 1
+		if polls < 2:
+			return "loading"
+		return fail
+
+	func transcribe_wav(_wav: PackedByteArray) -> Dictionary:
+		return {"text": "готово", "crash": false}
+
+	func unload() -> void:
+		polls = 0
 
 
 class _Probe:
