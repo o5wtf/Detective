@@ -193,10 +193,11 @@ func stop_filler() -> void:
 
 
 func _run_filler(agent_id: String, token: int) -> void:
-	var seconds := float(FillerBank.delay()) / 1000.0
-	if seconds > 0.0:
-		await get_tree().create_timer(seconds).timeout
-	else:
+	var armed_ms := Time.get_ticks_msec()
+	var wait := FillerBank.delay()
+	if wait <= 0:
+		await get_tree().process_frame
+	while token == _filler_token and Time.get_ticks_msec() - armed_ms < wait:
 		await get_tree().process_frame
 	if token != _filler_token:
 		return

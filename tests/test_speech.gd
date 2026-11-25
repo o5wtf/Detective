@@ -1043,6 +1043,36 @@ func test_stream_without_audio_surfaces_an_error() -> void:
 	speaker.free()
 
 
+func test_cancelled_stream_log_has_sizes_and_not_the_payload() -> void:
+	var http := _StepHttp.new()
+	var speaker := _voice_speaker(http)
+	var backend: GeminiTtsBackend = speaker.get("backend")
+	var transport: GeminiTtsBackend.GeminiTtsTransport = backend.transport
+	var marker := "AUDIOMARKER1234567890PAYLOAD"
+	speaker.call("speak_reply", "agent", "Короткая фраза для отмены.")
+	http.mode = "connected"
+	transport._tick()
+	http.mode = "requesting"
+	transport._tick()
+	http.chunks.append(("data: {\"inlineData\":\"%s\"}\n\n" % marker).to_utf8_buffer())
+	http.mode = "body"
+	transport._tick()
+	transport._tick()
+	transport.cancel()
+	var cancelled_line := ""
+	var start := maxi(0, Speaker.voice_log.size() - 8)
+	for index in range(start, Speaker.voice_log.size()):
+		var line := str(Speaker.voice_log[index])
+		if line.contains("exit=cancelled"):
+			cancelled_line = line
+	assert_false(cancelled_line == "")
+	assert_false(cancelled_line.contains(marker))
+	assert_false(cancelled_line.contains("body="))
+	assert_true(cancelled_line.contains("tts status="))
+	assert_false(cancelled_line.contains("bytes=0 "))
+	speaker.free()
+
+
 func test_stream_after_first_audio_is_not_cut_by_the_clock() -> void:
 	var now := {"ms": 0}
 	var http := _StepHttp.new()

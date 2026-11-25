@@ -14,7 +14,7 @@ const CASE_FIELDS: PackedStringArray = [
 	"motive_options", "method_options", "agents", "evidence",
 ]
 const AGENT_FIELDS: PackedStringArray = [
-	"name", "role", "personality", "prompt_background", "background", "facts",
+	"name", "role", "personality", "prompt_background", "facts",
 ]
 
 
@@ -490,15 +490,6 @@ static func _validate_evidence(
 				"evidence_unknown_agent",
 				"%s: агент %s не существует" % [where, _show(agent_id)]
 			))
-	var no_facts := _falsy(evidence.get("related_fact_ids"))
-	var no_agents := _falsy(evidence.get("related_agent_ids"))
-	if not _falsy(evidence.get("is_key")) and no_facts and no_agents:
-		errors.append(error("key_evidence_unlinked", "ключевая улика %s ни с чем не связана" % _show(evidence_id)))
-	if not _falsy(evidence.get("is_key")) and no_facts:
-		errors.append(error(
-			"key_evidence_no_facts",
-			"ключевая улика %s не связана ни с одним фактом" % _show(evidence_id)
-		))
 	errors.append_array(Conditions.check(
 		evidence.get("unlock_condition"),
 		where,

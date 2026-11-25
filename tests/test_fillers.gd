@@ -206,6 +206,45 @@ func test_unknown_voice_uses_gemini_cache_and_does_not_change_the_turn() -> void
 	_restore_config(previous)
 
 
+func test_filler_waits_until_dialogue_sent_plus_the_delay() -> void:
+	var previous := _remember_config()
+	_voice("gemini", "gemini-3.8-flash-lite-tts", true, true)
+	assert_true(Game.open_case("res://cases/rain_over_shadow.json").ok)
+	FillerBank.delay_ms = 5000
+	FillerBank.last_line = ""
+	Speaker.stop_filler()
+	var root: Window = (Engine.get_main_loop() as SceneTree).root
+	var screen := (load("res://ui/screens/interrogation.tscn") as PackedScene).instantiate()
+	root.add_child(screen)
+	await (Engine.get_main_loop() as SceneTree).process_frame
+	var mock := _Turn.new()
+	LLM.add_child(mock)
+	var old_client: Variant = LLM.client
+	LLM.client = mock
+	assert_false(Speaker._filler_waiting)
+	await Game.ask("mira_belova", "Где вы были?")
+	assert_true(mock.waiting_at_generate)
+	assert_true(Speaker._filler_waiting)
+	assert_eq(Speaker.filler_line, "")
+	Speaker.stop_filler()
+	FillerBank.delay_ms = 180
+	var started := Time.get_ticks_msec()
+	Speaker.arm_filler("mira_belova")
+	await (Engine.get_main_loop() as SceneTree).create_timer(0.08).timeout
+	assert_eq(Speaker.filler_line, "")
+	assert_true(Speaker._filler_waiting)
+	await (Engine.get_main_loop() as SceneTree).create_timer(0.16).timeout
+	assert_eq(Speaker.filler_line, "Хм…")
+	assert_true(Time.get_ticks_msec() - started >= 180)
+	Speaker.stop_filler()
+	LLM.client = old_client
+	mock.free()
+	screen.free()
+	FillerBank.delay_ms = -1
+	FillerBank.last_line = ""
+	_restore_config(previous)
+
+
 func test_fallback_transcript_uses_the_separate_guard() -> void:
 	assert_true(Game.open_case("res://cases/rain_over_shadow.json").ok)
 	var closed := ""
@@ -256,6 +295,31 @@ func _restore_config(previous: String) -> void:
 		restore.close()
 	SettingsStore.invalidate_cache()
 	Speaker.apply_settings()
+
+
+class _Turn:
+	extends LLMClient
+
+	var waiting_at_generate: bool = false
+
+	func generate(_request: Dictionary) -> Dictionary:
+		waiting_at_generate = Speaker._filler_waiting
+		return {
+			"ok": true,
+			"json": {
+				"player_tone": 0,
+				"reply": "Я была дома.",
+				"remark": "кивает",
+				"emotion": "neutral",
+				"stated": [],
+				"mentioned_evidence": [],
+				"requested_evidence": null,
+			},
+			"raw_text": "",
+			"error": "",
+			"retry_after_s": 0.0,
+			"message": "",
+		}
 
 
 class _Fetch:

@@ -23,12 +23,6 @@
       "улика e1: OR должен быть единственным ключом с непустым списком"
     ]
   },
-  "broken_key_evidence_no_facts.json": {
-    "errors": 1,
-    "messages": [
-      "ключевая улика e1 не связана ни с одним фактом"
-    ]
-  },
   "broken_killer_missing.json": {
     "errors": 1,
     "messages": [

@@ -692,15 +692,13 @@ func _log_tts(outcome: Dictionary) -> void:
 	var diag: Dictionary = outcome.get("diag", {})
 	if diag.is_empty():
 		return
-	var body := str(diag.get("body", "")).replace("\n", " ")
-	var line := "tts status=%s type=%s bytes=%s events=%s audio=%s exit=%s body=%s" % [
+	var line := "tts status=%s type=%s bytes=%s events=%s audio=%s exit=%s" % [
 		str(diag.get("status", "")),
 		str(diag.get("content_type", "")),
 		str(diag.get("bytes", 0)),
 		str(diag.get("events", 0)),
 		str(diag.get("audio", 0)),
 		str(diag.get("exit", "")),
-		body,
 	]
 	if is_instance_valid(Speaker):
 		Speaker.note_line(line)
@@ -991,7 +989,6 @@ class GeminiTtsTransport:
 	var _status: int = 0
 	var _bytes: int = 0
 	var _content_type: String = ""
-	var _preview: String = ""
 	var _exit: String = ""
 	var _http: Object = null
 	var _decoder: GeminiSseDecoder = null
@@ -1037,7 +1034,6 @@ class GeminiTtsTransport:
 		_status = 0
 		_bytes = 0
 		_content_type = ""
-		_preview = ""
 		_exit = ""
 		_error_body = PackedByteArray()
 		_decoder = null
@@ -1117,7 +1113,6 @@ class GeminiTtsTransport:
 		_exit = "eof"
 		if _decoder == null:
 			var raw := _redact(_error_body.get_string_from_utf8())
-			_preview = raw.substr(0, 300)
 			var kind := "eof"
 			if _status == 429:
 				kind = GeminiTtsBackend.limit_kind(_status, raw)
@@ -1221,10 +1216,6 @@ class GeminiTtsTransport:
 
 	func _note_bytes(chunk: PackedByteArray) -> void:
 		_bytes += chunk.size()
-		if _preview.length() >= 300:
-			return
-		var text := _redact(chunk.get_string_from_utf8())
-		_preview = (_preview + text).substr(0, 300)
 
 	func _header_value(name: String) -> String:
 		if _http == null or not _http.has_method("get_response_headers"):
@@ -1257,7 +1248,6 @@ class GeminiTtsTransport:
 			"events": events,
 			"audio": audio,
 			"exit": _exit,
-			"body": _preview,
 		}
 
 	func _outcome(ok: bool, status: int, error_kind: String, retry_after: float, usage: Dictionary) -> Dictionary:
