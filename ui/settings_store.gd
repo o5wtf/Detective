@@ -30,7 +30,7 @@ var mic_mode: String = "push_to_talk"
 var mic_pause_ms: int = 700
 ## Число давления рядом с ремаркой. В обычной игре скрыто.
 var developer: bool = false
-## gemini | system. По умолчанию облачное распознавание.
+## gemini | parakeet. system и неизвестное читаются как gemini.
 var stt_backend: String = "gemini"
 
 static var _cached: SettingsStore
@@ -81,9 +81,13 @@ static func load_current() -> SettingsStore:
 		store.mic_pause_ms = clampi(int(file.get_value("mic", "pause_ms")), 400, 2000)
 	if loaded and file.has_section_key("llm", "developer"):
 		store.developer = bool(file.get_value("llm", "developer"))
-	store.stt_backend = "gemini"
-	if loaded and str(file.get_value("mic", "stt", "gemini")) == "system":
-		file.set_value("mic", "stt", "gemini")
+	var raw_stt := "gemini"
+	if loaded:
+		raw_stt = str(file.get_value("mic", "stt", "gemini"))
+	var stt_name := canonical_stt(raw_stt)
+	store.stt_backend = stt_name
+	if loaded and raw_stt != stt_name:
+		file.set_value("mic", "stt", stt_name)
 		file.save(PATH)
 		invalidate_cache()
 	_cached = store
@@ -123,6 +127,10 @@ static func canonical_engine(engine: String) -> String:
 	return "gemini" if engine.strip_edges() == "gemini" else "system"
 
 
+static func canonical_stt(backend: String) -> String:
+	return "parakeet" if backend.strip_edges() == "parakeet" else "gemini"
+
+
 static func save_values(provider: String, api_key: String, dialogue_model: String, text_scale: float, timing_debug: Variant = null, voice_enabled: Variant = null, voice_engine: Variant = null, voice_intonation: Variant = null, mic_enabled: Variant = null, mic_mode: Variant = null, stt_backend: Variant = null, stt_offline: Variant = null, tts_model: Variant = null, tts_auto: Variant = null, chirp_key: Variant = null, mic_pause_ms: Variant = null, developer: Variant = null) -> void:
 	var file := ConfigFile.new()
 	file.load(PATH)
@@ -156,7 +164,7 @@ static func save_values(provider: String, api_key: String, dialogue_model: Strin
 	if developer != null:
 		file.set_value("llm", "developer", bool(developer))
 	if stt_backend != null:
-		file.set_value("mic", "stt", "gemini")
+		file.set_value("mic", "stt", canonical_stt(str(stt_backend)))
 	invalidate_cache()
 	file.save(PATH)
 

@@ -26,6 +26,11 @@ var _chirp_hint: Label
 var _voice_status: Label
 var _mic: CheckBox
 var _mic_mode: OptionButton
+var _stt_choice: OptionButton
+var _model_status: Label
+var _model_progress: ProgressBar
+var _cancel_model: Button
+var _downloader: ModelDownload
 var _pause: HSlider
 var _pause_value: Label
 var _voice_busy: bool = false
@@ -173,6 +178,46 @@ func _ready() -> void:
 	_mic_mode.add_item(UiStrings.MIC_PUSH)
 	_mic_mode.add_item(UiStrings.MIC_HANDS_FREE)
 	scroll_box.add_child(_mic_mode)
+	scroll_box.add_child(UiWidgets.label(GameLanguage.text("stt_label")))
+	_stt_choice = OptionButton.new()
+	_stt_choice.name = "SttChoice"
+	_stt_choice.custom_minimum_size = Vector2(0, 48)
+	_stt_choice.add_item(GameLanguage.text("stt_cloud"))
+	_stt_choice.add_item(GameLanguage.text("stt_device"))
+	scroll_box.add_child(_stt_choice)
+	var license := UiWidgets.label(GameLanguage.text("model_license"), "ModelLicense")
+	license.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	license.add_theme_color_override("font_color", NoirTheme.MUTED)
+	scroll_box.add_child(license)
+	var wifi := UiWidgets.label(GameLanguage.text("model_wifi"), "ModelWifi")
+	wifi.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	scroll_box.add_child(wifi)
+	var download := UiWidgets.button(GameLanguage.text("model_download"), "DownloadModelButton")
+	download.pressed.connect(_download_model)
+	scroll_box.add_child(download)
+	_model_progress = ProgressBar.new()
+	_model_progress.name = "ModelProgress"
+	_model_progress.min_value = 0
+	_model_progress.max_value = 1
+	_model_progress.value = 0
+	_model_progress.show_percentage = false
+	_model_progress.visible = false
+	scroll_box.add_child(_model_progress)
+	_cancel_model = UiWidgets.button(GameLanguage.text("model_cancel"), "CancelModelButton")
+	_cancel_model.visible = false
+	_cancel_model.pressed.connect(_cancel_model_download)
+	scroll_box.add_child(_cancel_model)
+	var delete_model := UiWidgets.button(GameLanguage.text("model_delete"), "DeleteModelButton")
+	delete_model.pressed.connect(_delete_model)
+	scroll_box.add_child(delete_model)
+	_model_status = UiWidgets.label("", "ModelStatus")
+	_model_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	scroll_box.add_child(_model_status)
+	_downloader = ModelDownload.new()
+	_downloader.name = "ModelDownload"
+	_downloader.progress_changed.connect(_on_model_progress)
+	_downloader.state_changed.connect(_on_model_state)
+	add_child(_downloader)
 	scroll_box.add_child(UiWidgets.label(UiStrings.MIC_PAUSE_LABEL))
 	_pause = HSlider.new()
 	_pause.name = "PauseSlider"
@@ -232,6 +277,8 @@ func _load_fields() -> void:
 	_intonation.button_pressed = store.voice_intonation
 	_mic.button_pressed = store.mic_enabled
 	_mic_mode.select(1 if store.mic_mode == "hands_free" else 0)
+	_stt_choice.select(1 if store.stt_backend == "parakeet" else 0)
+	_refresh_model_status()
 	_pause.value = store.mic_pause_ms
 	_pause_value.text = "%d мс" % store.mic_pause_ms
 	_engine.select(1 if store.voice_engine == "gemini" else 0)
@@ -247,6 +294,63 @@ func _load_fields() -> void:
 	_mock.button_pressed = store.provider == "mock"
 	_timing.button_pressed = store.timing_debug
 	_developer.button_pressed = store.developer
+
+
+func _stt_value() -> String:
+	if _stt_choice != null and _stt_choice.selected == 1:
+		return "parakeet"
+	return "gemini"
+
+
+func _download_model() -> void:
+	_model_status.text = GameLanguage.text("model_wifi")
+	_cancel_model.visible = true
+	_model_progress.visible = true
+	await _downloader.start()
+
+
+func _cancel_model_download() -> void:
+	if _downloader != null:
+		_downloader.cancel()
+
+
+func _delete_model() -> void:
+	if _downloader != null:
+		_downloader.cancel()
+	ModelDownload.delete_all()
+	_refresh_model_status()
+
+
+func _refresh_model_status() -> void:
+	if _model_status == null:
+		return
+	if LocalStt.last_reason == "load_failed" or LocalStt.last_reason == "no_native" or LocalStt.last_reason == "crash":
+		_model_status.text = GameLanguage.text("model_load_failed")
+	elif ModelDownload.is_installed():
+		_model_status.text = GameLanguage.text("model_ready")
+	else:
+		_model_status.text = ""
+
+
+func _on_model_progress(received: int, total: int) -> void:
+	if _model_progress == null:
+		return
+	_model_progress.max_value = maxi(total, 1)
+	_model_progress.value = received
+
+
+func _on_model_state(status: String, detail: String) -> void:
+	var active := status == "running"
+	if _cancel_model != null:
+		_cancel_model.visible = active
+	if _model_progress != null:
+		_model_progress.visible = active
+	if _model_status == null:
+		return
+	if detail != "":
+		_model_status.text = detail
+	elif status == "ready":
+		_model_status.text = GameLanguage.text("model_ready")
 
 
 func _on_pause_changed(value: float) -> void:
@@ -282,7 +386,7 @@ func _save() -> void:
 	if key == "":
 		key = previous.api_key
 	var provider := "mock" if _mock.button_pressed else "gemini"
-	SettingsStore.save_values(provider, key, _selected_model(), _scale.value, _timing.button_pressed, _voice.button_pressed, _engine_value(), _intonation.button_pressed, _mic.button_pressed, "hands_free" if _mic_mode.selected == 1 else "push_to_talk", "gemini", false, _tts_model_value(), _tts_auto.button_pressed, _chirp_key_value(), int(_pause.value), _developer.button_pressed)
+	SettingsStore.save_values(provider, key, _selected_model(), _scale.value, _timing.button_pressed, _voice.button_pressed, _engine_value(), _intonation.button_pressed, _mic.button_pressed, "hands_free" if _mic_mode.selected == 1 else "push_to_talk", _stt_value(), false, _tts_model_value(), _tts_auto.button_pressed, _chirp_key_value(), int(_pause.value), _developer.button_pressed)
 	Speaker.apply_settings()
 	_key.text = ""
 	_key.secret = true
@@ -421,7 +525,7 @@ func _save_tts_choice() -> void:
 	if key == "":
 		key = previous.api_key
 	var provider := "mock" if _mock.button_pressed else "gemini"
-	SettingsStore.save_values(provider, key, _selected_model(), _scale.value, _timing.button_pressed, _voice.button_pressed, _engine_value(), _intonation.button_pressed, _mic.button_pressed, null, "gemini", false, _tts_model_value(), _tts_auto.button_pressed, _chirp_key_value())
+	SettingsStore.save_values(provider, key, _selected_model(), _scale.value, _timing.button_pressed, _voice.button_pressed, _engine_value(), _intonation.button_pressed, _mic.button_pressed, null, _stt_value(), false, _tts_model_value(), _tts_auto.button_pressed, _chirp_key_value())
 	_refresh_tts_panel()
 	_show_chirp_key_state()
 	Speaker.apply_settings()
