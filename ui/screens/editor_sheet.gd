@@ -212,6 +212,7 @@ static func _break_item(editor: CaseEditor, fact_index: int, set_index: int, ite
 	kind.add_item("Пересказаны слова")
 	kind.select(1 if str(item.get("type", "")) == "testimony_retold" else 0)
 	var target := OptionButton.new()
+	target.name = "BreakTarget_%d_%d_%d" % [fact_index, set_index, item_index]
 	var full := CheckBox.new()
 	full.text = "только полная правда"
 	full.button_pressed = str(item.get("form", "")) == "truth_full"
@@ -247,10 +248,20 @@ static func _break_item(editor: CaseEditor, fact_index: int, set_index: int, ite
 			point.erase("form")
 		_write_break(editor, fact_at, set_at, item_at, point)
 	)
+	var full_title := _break_full(editor, item)
+	target.tooltip_text = full_title
+	var shown := Label.new()
+	shown.name = "BreakFull_%d_%d_%d" % [fact_index, set_index, item_index]
+	shown.text = full_title
+	shown.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	shown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(kind)
 	row.add_child(target)
 	row.add_child(full)
-	return row
+	var host := VBoxContainer.new()
+	host.add_child(row)
+	host.add_child(shown)
+	return host
 
 
 static func _contradictions(editor: CaseEditor, fact_id: String) -> Control:
@@ -460,6 +471,8 @@ static func _condition(editor: CaseEditor, index: int, evidence_id: String, cond
 				box.add_child(nested)
 		elif str(body.get("type", "")) == "evidence_mentioned":
 			box.add_child(_agent_pick(editor, index, evidence_id, "agent_id", str(body.get("agent_id", ""))))
+			box.add_child(UiWidgets.label("Тема"))
+			editor._help_button(box, "MentionHelp_%s" % evidence_id, "Откроется, когда разговор с этим персонажем дважды коснётся темы или игрок прямо спросит")
 			var topic := LineEdit.new()
 			topic.name = "EvTopic_%s" % evidence_id
 			topic.text = str(body.get("topic", ""))
@@ -472,7 +485,6 @@ static func _condition(editor: CaseEditor, index: int, evidence_id: String, cond
 				editor._schedule()
 			)
 			box.add_child(topic)
-			editor._help_button(box, "MentionHelp_%s" % evidence_id, "Откроется, когда разговор с этим персонажем дважды коснётся темы или игрок прямо спросит")
 		elif str(body.get("type", "")) == "lie_broken":
 			box.add_child(_fact_pick(editor, index, evidence_id, str(body.get("fact_id", ""))))
 		elif str(body.get("type", "")) == "dialogue_with":
@@ -653,7 +665,7 @@ static func _owner(editor: CaseEditor, fact_id: String) -> String:
 	return ""
 
 
-static func _fact_label(editor: CaseEditor, fact_id: String) -> String:
+static func _fact_full(editor: CaseEditor, fact_id: String) -> String:
 	var owner := ""
 	var text := fact_id
 	for agent in editor._doc.raw.get("agents", []):
@@ -662,10 +674,28 @@ static func _fact_label(editor: CaseEditor, fact_id: String) -> String:
 		for fact in (agent as Dictionary).get("facts", []):
 			if fact is Dictionary and str((fact as Dictionary).get("id", "")) == fact_id:
 				owner = str((agent as Dictionary).get("name", (agent as Dictionary).get("id", "")))
-				text = str((fact as Dictionary).get("content_full", fact_id))
-	if text.length() > 42:
-		text = text.substr(0, 42)
+				text = str((fact as Dictionary).get("content_full", fact_id)).replace("\n", " ")
 	return "%s: %s" % [owner, text]
+
+
+static func _fact_label(editor: CaseEditor, fact_id: String) -> String:
+	return _ellipsize(_fact_full(editor, fact_id))
+
+
+static func _break_full(editor: CaseEditor, item: Dictionary) -> String:
+	if str(item.get("type", "")) == "testimony_retold":
+		return _fact_full(editor, str(item.get("fact_id", "")))
+	var evidence_id := str(item.get("evidence_id", ""))
+	for evidence in editor._doc.raw.get("evidence", []):
+		if evidence is Dictionary and str((evidence as Dictionary).get("id", "")) == evidence_id:
+			return str((evidence as Dictionary).get("title", evidence_id))
+	return evidence_id
+
+
+static func _ellipsize(text: String) -> String:
+	if text.length() <= 42:
+		return text
+	return text.substr(0, 41) + "…"
 
 
 static func _evidence_owners(editor: CaseEditor, evidence_id: String) -> Dictionary:
