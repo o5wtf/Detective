@@ -366,6 +366,10 @@ static func _validate_break_sets(
 		seen_sets[fingerprint] = true
 
 
+static func effective_sets(fact: Dictionary, contradictions: Array) -> Array:
+	return _effective_sets(fact, contradictions)
+
+
 static func _effective_sets(fact: Dictionary, contradictions: Array) -> Array:
 	if fact.has("breaks_with") and fact.get("breaks_with") is Array:
 		return fact.get("breaks_with")
