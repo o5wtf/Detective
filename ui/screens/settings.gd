@@ -22,6 +22,8 @@ var _tts_model_label: Label
 var _tts_model: OptionButton
 var _tts_auto: CheckBox
 var _tts_note: Label
+var _fillers: CheckBox
+var _fillers_note: Label
 var _chirp_key: TextEdit
 var _chirp_label: Label
 var _chirp_hint: Label
@@ -164,6 +166,16 @@ func _ready() -> void:
 	_tts_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_tts_note.add_theme_color_override("font_color", NoirTheme.MUTED)
 	scroll_box.add_child(_tts_note)
+	_fillers = CheckBox.new()
+	_fillers.name = "FillersEnabled"
+	_fillers.text = GameLanguage.text("fillers_label")
+	_fillers.custom_minimum_size = Vector2(0, 48)
+	_fillers.toggled.connect(_on_fillers_toggled)
+	scroll_box.add_child(_fillers)
+	_fillers_note = UiWidgets.label(GameLanguage.text("fillers_gemini_only"), "FillersNote")
+	_fillers_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_fillers_note.add_theme_color_override("font_color", NoirTheme.MUTED)
+	scroll_box.add_child(_fillers_note)
 	var voice_check := UiWidgets.button(UiStrings.VOICE_CHECK, "VoiceCheckButton")
 	voice_check.pressed.connect(_check_voice)
 	scroll_box.add_child(voice_check)
@@ -301,6 +313,7 @@ func _load_fields() -> void:
 	_tts_auto.button_pressed = store.tts_auto
 	_chirp_key.placeholder_text = UiStrings.KEY_SAVED_PLACEHOLDER if store.chirp_key != "" else UiStrings.CHIRP_KEY_HINT
 	_chirp_key.text = ""
+	_fillers.button_pressed = store.fillers
 	_refresh_tts_panel()
 	_show_chirp_key_state()
 	_loading = false
@@ -526,6 +539,12 @@ func _on_intonation_toggled(pressed: bool) -> void:
 	SettingsStore.save_values(provider, key, _selected_model(), _scale.value, _timing.button_pressed, _voice.button_pressed, _engine_value(), pressed)
 
 
+func _on_fillers_toggled(pressed: bool) -> void:
+	if _loading:
+		return
+	SettingsStore.save_value("voice", "fillers", pressed)
+
+
 func _on_engine_picked(_index: int) -> void:
 	if _loading:
 		return
@@ -573,12 +592,22 @@ func _refresh_tts_panel() -> void:
 	_chirp_label.visible = google
 	_chirp_hint.visible = google and not TtsQuota.chirp_ready()
 	_tts_note.text = TtsQuota.status_line(TtsQuota.now_unix()) if google else ""
+	_refresh_fillers()
 	var chirp_index := TtsQuota.chain().find(ChirpVoices.MODEL_ID)
 	if chirp_index >= 0:
 		var blocked := not TtsQuota.chirp_ready()
 		_tts_model.set_item_disabled(chirp_index, blocked)
 		if blocked and _tts_model.selected == chirp_index:
 			_tts_model.select(0)
+
+
+func _refresh_fillers() -> void:
+	if _fillers == null:
+		return
+	var enabled := FillerBank.controls_enabled()
+	_fillers.disabled = not enabled
+	if _fillers_note != null:
+		_fillers_note.visible = not enabled
 
 
 func _chirp_key_value():

@@ -36,6 +36,8 @@ var stt_backend: String = "gemini"
 var mic_merged: bool = false
 ## Мат в репликах, если у персонажа sometimes или often.
 var profanity: bool = false
+## Междометия, пока персонаж ещё не ответил. Включены, пока игрок сам их не выключит.
+var fillers: bool = true
 
 static var _cached: SettingsStore
 static var _cached_hash: String = ""
@@ -93,6 +95,10 @@ static func load_current() -> SettingsStore:
 	if loaded and file.has_section_key("dialogue", "profanity"):
 		raw_profanity = file.get_value("dialogue", "profanity")
 	store.profanity = typeof(raw_profanity) == TYPE_BOOL and raw_profanity
+	var raw_fillers: Variant = true
+	if loaded and file.has_section_key("voice", "fillers"):
+		raw_fillers = file.get_value("voice", "fillers")
+	store.fillers = typeof(raw_fillers) != TYPE_BOOL or raw_fillers
 	var raw_stt := "gemini"
 	if loaded:
 		raw_stt = str(file.get_value("mic", "stt", "gemini"))
@@ -128,6 +134,7 @@ func detached() -> SettingsStore:
 	copy.stt_backend = stt_backend
 	copy.mic_merged = mic_merged
 	copy.profanity = profanity
+	copy.fillers = fillers
 	return copy
 
 

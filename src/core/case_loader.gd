@@ -97,6 +97,7 @@ static func _agent(raw: Dictionary) -> CaseData.Agent:
 	agent.own_version = _string(raw.get("own_version"))
 	agent.life_details = _string(raw.get("life_details"))
 	agent.sample_lines = _strings(raw.get("sample_lines"))
+	agent.filler_lines = _filler_lines(raw.get("filler_lines"))
 	if raw.get("relationships") is Dictionary:
 		agent.relationships = (raw.get("relationships") as Dictionary).duplicate(true)
 	for fact_raw in _array(raw.get("facts")):
@@ -185,6 +186,18 @@ static func _breaks(value: Variant) -> Variant:
 	if value is Array:
 		return _strings(value)
 	return _string(value)
+
+
+static func _filler_lines(value: Variant) -> Array[String]:
+	var result: Array[String] = []
+	for item in _array(value):
+		var line := _string(item).strip_edges()
+		if line == "":
+			continue
+		result.append(line)
+		if result.size() == 3:
+			break
+	return result
 
 
 static func _strings(value: Variant) -> Array[String]:

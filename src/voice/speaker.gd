@@ -25,6 +25,12 @@ var _prefetch_busy: bool = false
 var _prefetch_token: int = 0
 var voice_log: PackedStringArray = PackedStringArray()
 var turn_log: PackedStringArray = PackedStringArray()
+var filler_playing: bool = false
+var filler_line: String = ""
+var _filler_token: int = 0
+var _filler_waiting: bool = false
+var _filler_spent: bool = false
+var _filler_player: AudioStreamPlayer = null
 
 
 func _ready() -> void:
@@ -155,16 +161,132 @@ func retry_failed() -> void:
 
 
 func suspend_playback() -> void:
+	if _filler_player != null and _filler_player.playing:
+		_filler_player.stream_paused = true
 	if backend != null and backend.has_method("suspend_playback"):
 		backend.suspend_playback()
 
 
 func resume_playback() -> void:
+	if _filler_player != null and _filler_player.stream_paused:
+		_filler_player.stream_paused = false
 	if backend != null and backend.has_method("resume_playback"):
 		backend.resume_playback()
 
 
+func arm_filler(agent_id: String) -> void:
+	if _filler_waiting or filler_playing or _filler_spent:
+		return
+	if not FillerBank.allowed():
+		return
+	_filler_waiting = true
+	_filler_token += 1
+	_run_filler(agent_id, _filler_token)
+
+
+func stop_filler() -> void:
+	_filler_token += 1
+	_filler_waiting = false
+	_filler_spent = false
+	filler_line = ""
+	_halt_filler_player()
+
+
+func _run_filler(agent_id: String, token: int) -> void:
+	var seconds := float(FillerBank.delay()) / 1000.0
+	if seconds > 0.0:
+		await get_tree().create_timer(seconds).timeout
+	else:
+		await get_tree().process_frame
+	if token != _filler_token:
+		return
+	_filler_waiting = false
+	if not FillerBank.allowed():
+		return
+	if queue.current_id != "" or not queue.pending.is_empty():
+		return
+	await _play_filler(agent_id, token)
+
+
+func _play_filler(agent_id: String, token: int) -> void:
+	if token != _filler_token or Game.case_data == null:
+		return
+	var agent: CaseData.Agent = Game.case_data.agent_by_id.get(agent_id) as CaseData.Agent
+	var text := FillerBank.pick(FillerBank.lines_for(agent))
+	if text == "":
+		return
+	var voice := VoiceCast.voice_for(agent)
+	var path := FillerBank.builtin_path(voice, text)
+	if path != "":
+		var stream := load(path) as AudioStream
+		if stream != null:
+			_start_filler_stream(stream, text)
+		return
+	if speaking or filler_playing:
+		return
+	if not backend is GeminiTtsBackend:
+		return
+	var synth: Dictionary = await FillerSynth.ensure(voice, text, false, Callable(self, "_fetch_filler"))
+	if token != _filler_token or queue.current_id != "":
+		return
+	if not synth.get("ok", false):
+		return
+	var pcm: PackedByteArray = synth.get("pcm", PackedByteArray())
+	var made := _wav_from_pcm(pcm)
+	if made.data.is_empty():
+		return
+	_start_filler_stream(made, text)
+
+
+func _fetch_filler(model: String, voice: String, text: String) -> Dictionary:
+	if not backend is GeminiTtsBackend:
+		return {"ok": false, "error": "system", "pcm": PackedByteArray()}
+	if TtsQuota.is_chirp(model):
+		return {"ok": false, "error": "chirp", "pcm": PackedByteArray()}
+	return await (backend as GeminiTtsBackend).capture_filler(text, voice, model)
+
+
+func _start_filler_stream(stream: AudioStream, text: String) -> void:
+	if _filler_player == null:
+		_filler_player = AudioStreamPlayer.new()
+		_filler_player.name = "FillerPlayer"
+		_filler_player.finished.connect(_on_filler_finished)
+		add_child(_filler_player)
+	_filler_player.stream = stream
+	_filler_player.play()
+	filler_line = text
+	filler_playing = true
+	_filler_spent = true
+	_set_speaking(true)
+
+
+func _on_filler_finished() -> void:
+	if not filler_playing:
+		return
+	filler_playing = false
+	_set_speaking(queue.current_id != "" or not queue.pending.is_empty())
+
+
+func _halt_filler_player() -> void:
+	filler_playing = false
+	if _filler_player != null and is_instance_valid(_filler_player):
+		_filler_player.stop()
+	_set_speaking(queue.current_id != "" or not queue.pending.is_empty())
+
+
+func _wav_from_pcm(pcm: PackedByteArray) -> AudioStreamWAV:
+	var stream := AudioStreamWAV.new()
+	if pcm.size() < 2:
+		return stream
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = 24000
+	stream.stereo = false
+	stream.data = pcm
+	return stream
+
+
 func stop_and_clear(cancel_prefetch: bool = true) -> void:
+	stop_filler()
 	if cancel_prefetch:
 		_prefetch_token += 1
 		_prefetch_jobs.clear()
@@ -262,6 +384,7 @@ func _bind_backend() -> void:
 
 
 func _on_started(line_id: String) -> void:
+	stop_filler()
 	TurnTiming.mark("playback_start")
 	if not retry_line.is_empty():
 		retry_line = {}
@@ -446,7 +569,9 @@ func _run_prefetch(token: int) -> void:
 
 
 func _set_speaking(active: bool) -> void:
-	if queue.current_id == "" and queue.pending.is_empty():
+	if filler_playing:
+		active = true
+	elif queue.current_id == "" and queue.pending.is_empty():
 		active = false
 	if active == speaking:
 		return

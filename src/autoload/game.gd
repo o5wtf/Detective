@@ -7,6 +7,7 @@ signal events(list: Array)
 signal llm_error(kind: String, message: String)
 signal save_failed(message: String)
 signal busy_changed(is_busy: bool)
+signal dialogue_sent(agent_id: String)
 
 var case_data: CaseData = null
 var state: GameState = null
@@ -193,6 +194,7 @@ func _turn(agent_id: String, player_text: String, event_note: String, evidence_i
 			_abort_turn(snapshot, turn_started, turn_model, tally, "empty", UiStrings.REPHRASE)
 			return
 		TurnTiming.mark("dialogue_sent")
+		dialogue_sent.emit(agent_id)
 		result = await _generate(request)
 		TurnTiming.mark("dialogue_done")
 		if not _turn_current(token):
@@ -228,6 +230,8 @@ func _turn(agent_id: String, player_text: String, event_note: String, evidence_i
 				if kind == "cap":
 					_abort_turn(snapshot, turn_started, turn_model, tally, "empty", UiStrings.REPHRASE)
 				elif SpeechJunk.is_junk(str(transcript.get("text", ""))) or kind == "junk":
+					if kind == "junk":
+						tally["fallback"] = "junk"
 					_abort_turn(snapshot, turn_started, turn_model, tally, "empty", GameLanguage.text("stt_repeat"))
 				else:
 					_abort_turn(snapshot, turn_started, turn_model, tally, kind, str(transcript.get("message", UiStrings.NO_LINK)))
@@ -238,6 +242,7 @@ func _turn(agent_id: String, player_text: String, event_note: String, evidence_i
 			_abort_turn(snapshot, turn_started, turn_model, tally, "empty", UiStrings.REPHRASE)
 			return
 		TurnTiming.mark("dialogue_sent")
+		dialogue_sent.emit(agent_id)
 		result = await _generate(request)
 		TurnTiming.mark("dialogue_done")
 		if not _turn_current(token):
@@ -502,6 +507,7 @@ func _should_regenerate(report: Dictionary, local_fixes: bool) -> bool:
 
 
 func _abort_turn(snapshot: Dictionary, started_ms: int, model: String, tally: Dictionary, error_kind: String, message: String) -> void:
+	Speaker.stop_filler()
 	_publish_turn_timing(Time.get_ticks_msec() - started_ms, model, tally)
 	_restore(snapshot)
 	_turn_snapshot = {}
@@ -511,6 +517,7 @@ func _abort_turn(snapshot: Dictionary, started_ms: int, model: String, tally: Di
 
 
 func _drop_turn() -> void:
+	Speaker.stop_filler()
 	_turn_token += 1
 	_turn_snapshot = {}
 	if is_busy:
@@ -628,15 +635,16 @@ func _fallback_transcript(wav: PackedByteArray, agent_id: String, tally: Diction
 		add_child(cloud)
 		backend = cloud
 		owned = true
+	var hint := SttHint.for_turn("gemini", case_data, state, agent_id, "")
 	if backend.has_method("set_hint"):
-		backend.set_hint(SttHint.for_turn("gemini", case_data, state, agent_id, ""))
+		backend.set_hint(hint)
 	var result: Dictionary = await backend.transcribe(wav)
 	if owned:
 		backend.queue_free()
 	var text := str(result.get("text", "")).strip_edges()
 	if not result.get("ok", false):
 		return {"text": "", "error": str(result.get("error", "offline")), "message": str(result.get("message", ""))}
-	if SpeechJunk.is_junk(text):
+	if SttGuard.reject(text, case_data, state, hint):
 		return {"text": "", "error": "junk", "message": ""}
 	return {"text": text, "error": "", "message": ""}
 
