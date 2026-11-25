@@ -166,6 +166,21 @@ func test_settings_key_is_not_copied_into_the_save() -> void:
 		file.close()
 
 
+func test_failed_replace_keeps_the_previous_save() -> void:
+	assert_true(Game.open_case(FIXTURE).ok)
+	Game.state.pressure["a"] = 3
+	assert_true(SaveState.write_state(Game.state))
+	var path := SaveState.slot_path(Game.state.case_id)
+	var before := FileAccess.get_file_as_string(path)
+	Game.state.pressure["a"] = 9
+	SaveState.fail_before_rename = true
+	assert_false(SaveState.write_state(Game.state))
+	SaveState.fail_before_rename = false
+	assert_eq(FileAccess.get_file_as_string(path), before)
+	assert_false(FileAccess.file_exists(path + ".tmp"))
+	SaveState.discard(Game.state.case_id)
+
+
 func _write(case_id: String, text: String) -> void:
 	DirAccess.make_dir_recursive_absolute("user://saves")
 	var file := FileAccess.open(SaveState.slot_path(case_id), FileAccess.WRITE)

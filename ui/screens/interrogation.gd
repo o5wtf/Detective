@@ -356,7 +356,7 @@ func _send_text(text: String) -> void:
 	_voice_gate = true
 	_heard_speech = false
 	_apply_voice_gate()
-	_last = {"kind": "ask", "text": spoken}
+	_last = {"kind": "ask", "text": spoken, "agent_id": agent_id}
 	_push({"kind": "player", "text": spoken})
 	TurnTiming.mark("line_shown")
 	await Game.ask(agent_id, spoken)
@@ -550,7 +550,7 @@ func _confirm_from_board(evidence_id: String) -> void:
 	_voice_gate = true
 	_heard_speech = false
 	_apply_voice_gate()
-	_last = {"kind": "present", "text": "", "evidence_id": evidence_id}
+	_last = {"kind": "present", "text": "", "evidence_id": evidence_id, "agent_id": agent_id}
 	_push({"kind": "system", "text": "Вы: %s" % UiStrings.presented_line(_evidence_title(evidence_id))})
 	await Game.present(agent_id, evidence_id, "")
 	_release_voice_gate()
@@ -564,7 +564,7 @@ func _confirm_hint() -> void:
 	_prompt.text = ""
 	_hide_hint()
 	_clear_error()
-	_last = {"kind": "present", "text": text, "evidence_id": evidence_id}
+	_last = {"kind": "present", "text": text, "evidence_id": evidence_id, "agent_id": agent_id}
 	var title := _evidence_title(evidence_id)
 	_push({"kind": "system", "text": "Вы: %s" % UiStrings.presented_line(title)})
 	await Game.present(agent_id, evidence_id, text)
@@ -574,11 +574,16 @@ func _retry_last() -> void:
 	if _last.is_empty() or _busy:
 		return
 	_clear_error()
+	var who := str(_last.get("agent_id", agent_id))
+	if who == "":
+		who = agent_id
 	if str(_last.get("kind", "")) == "present":
-		await Game.present(agent_id, str(_last.get("evidence_id", "")), str(_last.get("text", "")))
+		await Game.present(who, str(_last.get("evidence_id", "")), str(_last.get("text", "")))
 	else:
-		_push({"kind": "player", "text": str(_last.get("text", ""))})
-		await Game.ask(agent_id, str(_last.get("text", "")))
+		_push_to(who, {"kind": "player", "text": str(_last.get("text", ""))})
+		if who == agent_id:
+			_render_feed()
+		await Game.ask(who, str(_last.get("text", "")))
 
 
 func _refresh_hint_from_text() -> void:
@@ -633,7 +638,11 @@ func _on_events(list: Array) -> void:
 func _on_error(kind: String, message: String) -> void:
 	_pop_player_line()
 	var text := message.strip_edges()
-	if text == "":
+	if kind == "offline" or kind == "timeout" or text == UiStrings.NO_LINK:
+		if str(_last.get("kind", "")) == "ask" and _prompt != null:
+			_prompt.text = str(_last.get("text", ""))
+		text = UiStrings.NO_LINK
+	elif text == "":
 		text = UiStrings.error_text(kind)
 	_error.text = text
 	_error.visible = true

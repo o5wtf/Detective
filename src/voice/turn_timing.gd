@@ -39,6 +39,13 @@ static func note_reused(value: bool) -> void:
 		turns.back()["reused"] = false
 
 
+static func note_tts_reused(value: bool) -> void:
+	if turns.is_empty():
+		return
+	turns.back()["tts_reused"] = value
+	publish()
+
+
 static func note_tts(model: String, reason: String) -> void:
 	if turns.is_empty():
 		return
@@ -78,7 +85,8 @@ static func format_row(row: Dictionary) -> String:
 	parts.append(str(row.get("prefix", "ход")))
 	parts.append("backend=%s" % str(row.get("backend", "")))
 	parts.append("reused=%s" % ("yes" if bool(row.get("reused", false)) else "no"))
-	for key in ["audio_ready", "stt_sent", "stt_done", "line_shown", "dialogue_sent", "dialogue_done", "tts_sent", "first_audio", "playback_start"]:
+	parts.append("tts_reused=%s" % ("yes" if bool(row.get("tts_reused", false)) else "no"))
+	for key in ["audio_ready", "stt_sent", "stt_done", "line_shown", "dialogue_sent", "dialogue_first_byte", "dialogue_done", "tts_sent", "first_audio", "playback_start"]:
 		if marks.has(key) and origin > 0:
 			parts.append("%s=%d" % [key, int(marks[key]) - origin])
 	if marks.has("first_audio") and origin > 0:

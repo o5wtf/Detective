@@ -52,7 +52,7 @@ func test_request_body_uses_config_models_and_schema() -> void:
 	assert_eq(generation["responseMimeType"], "application/json")
 	assert_true(generation.has("responseJsonSchema"))
 	assert_eq(generation["responseJsonSchema"]["required"], ["reply"])
-	assert_eq(generation["thinkingConfig"]["thinkingLevel"], "LOW")
+	assert_eq(generation["thinkingConfig"]["thinkingLevel"], "MINIMAL")
 	assert_eq(generation["temperature"], 0.9)
 	assert_eq(generation["maxOutputTokens"], 2048)
 	var safety: Array = body["safetySettings"]
@@ -196,9 +196,13 @@ func test_timeout_and_offline() -> void:
 	assert_eq(transport.seen.size(), 2)
 	assert_true(str(transport.seen[1]["url"]).contains("/dialogue-model:"))
 	transport.push({"ok": false, "status": 0, "body": "", "headers": {}, "error": "offline"})
+	transport.push({"ok": false, "status": 0, "body": "", "headers": {}, "error": "offline"})
+	transport.push({"ok": false, "status": 0, "body": "", "headers": {}, "error": "offline"})
 	var offline: Dictionary = await client.generate(_request("dialogue"))
 	assert_eq(offline["error"], "offline")
-	assert_eq(transport.seen.size(), 3)
+	assert_eq(str(offline["message"]), UiStrings.NO_LINK)
+	assert_eq(transport.seen.size(), 5)
+	assert_eq(client.waits, [1.0, 1.0, 3.0])
 	client.free()
 
 
@@ -262,7 +266,7 @@ func test_truncated_json_retries_without_thinking() -> void:
 	assert_true(result["ok"])
 	assert_eq(result["json"]["reply"], "после повтора")
 	var retry: Dictionary = JSON.parse_string(transport.seen[1]["body"])
-	assert_eq(retry["generationConfig"]["thinkingConfig"]["thinkingLevel"], "LOW")
+	assert_eq(retry["generationConfig"]["thinkingConfig"]["thinkingLevel"], "MINIMAL")
 	assert_true(int(retry["generationConfig"]["maxOutputTokens"]) >= LLMConfig.REPLY_MAX_OUTPUT_TOKENS)
 	client.free()
 
@@ -292,7 +296,7 @@ func test_plain_400_is_not_an_auth_error() -> void:
 	var result: Dictionary = await client.generate(_request("dialogue"))
 	assert_true(result["ok"])
 	var retry: Dictionary = JSON.parse_string(transport.seen[1]["body"])
-	assert_false(retry["generationConfig"].has("thinkingConfig"))
+	assert_eq(retry["generationConfig"]["thinkingConfig"]["thinkingLevel"], "LOW")
 	assert_eq(transport.seen.size(), 2)
 	client.free()
 
@@ -305,9 +309,10 @@ func test_timeout_names_the_model() -> void:
 	var result: Dictionary = await client.generate(_request("dialogue"))
 	assert_eq(result["error"], "timeout")
 	assert_eq(transport.seen.size(), 3)
-	assert_true(str(result["message"]).contains("dialogue-model"))
+	assert_eq(str(result["message"]), UiStrings.NO_LINK)
 	assert_false(str(result["message"]).contains("Пробовали"))
-	assert_false(str(result["message"]).contains("Нет сети"))
+	assert_eq(client.waits, [1.0, 3.0])
+	assert_eq(float(transport.seen[0]["timeout"]), GeminiClient.ATTEMPT_TIMEOUT_S)
 	client.free()
 
 
@@ -365,6 +370,41 @@ func test_live_smoke_is_skipped_without_env_key() -> void:
 	var env_key := OS.get_environment("GEMINI_API_KEY").strip_edges()
 	if env_key == "":
 		assert_false(LLMConfig.live_smoke_enabled(env_key), "без ключа живой тест не запускается")
+
+
+func test_network_retries_do_not_spend_the_rate_limit_counter() -> void:
+	var client := await _client()
+	var transport: FakeTransport = client._transport
+	transport.push({"ok": false, "status": 0, "body": "", "headers": {}, "error": "offline"})
+	transport.push({"ok": false, "status": 0, "body": "", "headers": {}, "error": "offline"})
+	transport.push(_status(429, "{\"error\":{\"message\":\"busy\",\"status\":\"RESOURCE_EXHAUSTED\"}}"))
+	transport.push(_ok("{\"reply\":\"после сети\"}"))
+	var result: Dictionary = await client.generate(_request("dialogue"))
+	assert_true(result["ok"])
+	assert_eq(transport.seen.size(), 4)
+	assert_eq(client.waits[0], 1.0)
+	assert_eq(client.waits[1], 3.0)
+	client.free()
+
+
+func test_summary_thinking_does_not_replace_the_reply_level() -> void:
+	var client := await _client()
+	client.thinking_level = "MINIMAL"
+	client.accepted_thinking = {}
+	var transport: FakeTransport = client._transport
+	transport.push(_status(400, "{\"error\":{\"status\":\"INVALID_ARGUMENT\",\"message\":\"thinking level MINIMAL is not supported\"}}"))
+	transport.push(_ok("{\"reply\":\"сводка\"}"))
+	var summary: Dictionary = await client.generate(_request("summary"))
+	assert_true(summary["ok"])
+	transport.push(_ok("{\"reply\":\"реплика\"}"))
+	var reply: Dictionary = await client.generate(_request("dialogue"))
+	assert_true(reply["ok"])
+	var body: Dictionary = JSON.parse_string(transport.seen[2]["body"])
+	assert_eq(body["generationConfig"]["thinkingConfig"]["thinkingLevel"], "MINIMAL")
+	var stored := SettingsStore.load_thinking()
+	assert_false(stored.has("dialogue-model"))
+	assert_true(stored.has("dialogue-model|summary"))
+	client.free()
 
 
 func _client(key: String = SECRET) -> GeminiClient:
@@ -437,7 +477,7 @@ class FakeTransport:
 	func push(outcome: Dictionary) -> void:
 		scripted.append(outcome)
 
-	func request(url: String, headers: Dictionary, body: String, timeout_s: float) -> Dictionary:
+	func request(url: String, headers: Dictionary, body: String, timeout_s: float, _byte_mark: String = "") -> Dictionary:
 		calls += 1
 		seen.append({"url": url, "headers": headers, "body": body, "timeout": timeout_s})
 		if scripted.is_empty():

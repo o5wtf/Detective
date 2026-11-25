@@ -161,13 +161,15 @@ static func save_values(provider: String, api_key: String, dialogue_model: Strin
 	file.save(PATH)
 
 
-static func remember_thinking(model: String, level: String) -> void:
-	if not LLMConfig.is_dialogue_model(model):
+static func remember_thinking(model: String, level: String, role: String = "dialogue") -> void:
+	if not LLMConfig.is_dialogue_model(model) and role == "dialogue":
+		return
+	if model.strip_edges() == "":
 		return
 	var file := ConfigFile.new()
 	file.load(PATH)
 	var accepted := _thinking_map(str(file.get_value("llm", "thinking_accepted", "")))
-	accepted[model] = level
+	accepted["%s|%s" % [model, role]] = level
 	file.set_value("llm", "thinking_accepted", _thinking_text(accepted))
 	invalidate_cache()
 	file.save(PATH)
@@ -186,18 +188,19 @@ static func _thinking_map(raw: String) -> Dictionary:
 		var pair := piece.split("=", true, 1)
 		if pair.size() != 2:
 			continue
-		var model := pair[0].strip_edges()
+		var key := pair[0].strip_edges()
 		var level := pair[1].strip_edges()
-		if LLMConfig.is_dialogue_model(model) and level != "":
-			accepted[model] = level
+		if not key.contains("|") or level == "":
+			continue
+		accepted[key] = level
 	return accepted
 
 
 static func _thinking_text(accepted: Dictionary) -> String:
 	var parts: PackedStringArray = PackedStringArray()
-	for model in LLMConfig.DIALOGUE_MODELS:
-		if accepted.has(model):
-			parts.append("%s=%s" % [model, str(accepted[model])])
+	for key in accepted.keys():
+		parts.append("%s=%s" % [str(key), str(accepted[key])])
+	parts.sort()
 	return ",".join(parts)
 
 

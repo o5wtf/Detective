@@ -5,26 +5,45 @@ extends RefCounted
 
 
 const HOST := "generativelanguage.googleapis.com"
+const IDLE_REUSE_S := 45.0
 
 static var last_reused: bool = false
 static var maker: Callable = Callable()
+static var clock_ms: Callable = Callable()
 static var _idle: Dictionary = {}
 
 
 static func reset() -> void:
 	for host in _idle.keys():
 		var pool: Array = _idle[host]
-		for client in pool:
+		for item in pool:
+			var client: Object = null
+			if item is Dictionary:
+				client = (item as Dictionary).get("client")
+			else:
+				client = item
 			_close(client)
 	_idle.clear()
 	last_reused = false
+	clock_ms = Callable()
 
 
 static func checkout(host: String) -> Dictionary:
 	var pool: Array = _idle.get(host, [])
+	var now := _now_ms()
 	while not pool.is_empty():
-		var existing: Object = pool.pop_back()
+		var item: Variant = pool.pop_back()
 		_idle[host] = pool
+		var existing: Object = null
+		var since := now
+		if item is Dictionary:
+			existing = (item as Dictionary).get("client")
+			since = int((item as Dictionary).get("since", now))
+		else:
+			existing = item
+		if now - since > int(IDLE_REUSE_S * 1000.0):
+			_close(existing)
+			continue
 		if _status(existing) == HTTPClient.STATUS_CONNECTED:
 			last_reused = true
 			TurnTiming.note_reused(true)
@@ -43,7 +62,7 @@ static func checkin(host: String, client: Object, alive: bool) -> void:
 		_close(client)
 		return
 	var pool: Array = _idle.get(host, [])
-	pool.append(client)
+	pool.append({"client": client, "since": _now_ms()})
 	_idle[host] = pool
 
 
@@ -72,13 +91,20 @@ static func prewarm(node: Node) -> void:
 	checkin(HOST, http, _status(http) == HTTPClient.STATUS_CONNECTED)
 
 
-static func exchange(node: Node, url: String, headers: PackedStringArray, body: String, timeout_s: float) -> Dictionary:
+static func exchange(node: Node, url: String, headers: PackedStringArray, body: String, timeout_s: float, byte_mark: String = "") -> Dictionary:
+	var first := await _exchange_once(node, url, headers, body, timeout_s, byte_mark)
+	if bool(first.get("reused", false)) and str(first.get("error", "")) == "offline" and int(first.get("status", 0)) == 0:
+		return await _exchange_once(node, url, headers, body, timeout_s, byte_mark)
+	return first
+
+
+static func _exchange_once(node: Node, url: String, headers: PackedStringArray, body: String, timeout_s: float, byte_mark: String) -> Dictionary:
 	var parts := split_url(url)
 	var host := str(parts.get("host", ""))
 	var slot := checkout(host)
 	var http: Object = slot.client
 	var reused: bool = bool(slot.get("reused", false))
-	var deadline := Time.get_ticks_msec() + int(maxf(timeout_s, 1.0) * 1000.0)
+	var deadline := _now_ms() + int(maxf(timeout_s, 1.0) * 1000.0)
 	if _status(http) != HTTPClient.STATUS_CONNECTED:
 		var err := FAILED
 		if bool(parts.get("tls", false)):
@@ -89,7 +115,7 @@ static func exchange(node: Node, url: String, headers: PackedStringArray, body: 
 			checkin(host, http, false)
 			return _fail("offline", reused)
 		while _status(http) == HTTPClient.STATUS_CONNECTING or _status(http) == HTTPClient.STATUS_RESOLVING:
-			if Time.get_ticks_msec() >= deadline:
+			if _now_ms() >= deadline:
 				checkin(host, http, false)
 				return _fail("timeout", reused)
 			http.call("poll")
@@ -101,22 +127,26 @@ static func exchange(node: Node, url: String, headers: PackedStringArray, body: 
 			checkin(host, http, false)
 			return _fail("offline", reused)
 	var request_err := int(http.call("request", HTTPClient.METHOD_POST, str(parts.get("path", "/")), headers, body))
-	if request_err != OK:
+	if request_err != OK or _dropped(http):
 		checkin(host, http, false)
 		return _fail("offline", reused)
 	while _status(http) == HTTPClient.STATUS_REQUESTING:
-		if Time.get_ticks_msec() >= deadline:
+		if _now_ms() >= deadline:
 			checkin(host, http, false)
 			return _fail("timeout", reused)
 		http.call("poll")
+		if _dropped(http):
+			checkin(host, http, false)
+			return _fail("offline", reused)
 		if node != null and node.is_inside_tree():
 			await node.get_tree().process_frame
 		else:
 			break
 	var status := int(http.call("get_response_code"))
 	var buf := PackedByteArray()
+	var marked := false
 	while _status(http) == HTTPClient.STATUS_BODY:
-		if Time.get_ticks_msec() >= deadline:
+		if _now_ms() >= deadline:
 			checkin(host, http, false)
 			return _fail("timeout", reused)
 		http.call("poll")
@@ -129,6 +159,9 @@ static func exchange(node: Node, url: String, headers: PackedStringArray, body: 
 			else:
 				break
 			continue
+		if not marked and byte_mark != "":
+			TurnTiming.mark(byte_mark)
+			marked = true
 		buf.append_array(chunk)
 	var alive := _status(http) == HTTPClient.STATUS_CONNECTED
 	checkin(host, http, alive)
@@ -155,6 +188,17 @@ static func split_url(url: String) -> Dictionary:
 		host = hostport.substr(0, colon)
 		port = int(hostport.substr(colon + 1))
 	return {"host": host, "port": port, "tls": tls, "path": path}
+
+
+static func _now_ms() -> int:
+	if clock_ms.is_valid():
+		return int(clock_ms.call())
+	return Time.get_ticks_msec()
+
+
+static func _dropped(client: Object) -> bool:
+	var state := _status(client)
+	return state == HTTPClient.STATUS_DISCONNECTED or state == HTTPClient.STATUS_CONNECTION_ERROR
 
 
 static func _create(host: String) -> Object:

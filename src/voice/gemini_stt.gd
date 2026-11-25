@@ -5,8 +5,11 @@ extends SttBackend
 
 const MODEL := "gemini-3.5-flash-lite"
 const PROMPT := "Дословно расшифруй русскую речь. Верни только текст. Если речи нет, верни пустую строку."
-const TIMEOUT_S := 25.0
+const TIMEOUT_S := 8.0
+const DEADLINE_S := 25.0
+const NET_RETRIES := 2
 const TRANSIENT_RETRIES := 2
+const MIN_ATTEMPT_S := 3.0
 
 var model: String = MODEL
 var api_key: String = ""
@@ -30,17 +33,23 @@ func transcribe(wav: PackedByteArray) -> Dictionary:
 	if wav.is_empty():
 		return _failure("empty", "Пустая запись.")
 	var thinking := "MINIMAL"
-	var attempt := 0
+	var net_retries := 0
+	var transient_retries := 0
+	var started := Time.get_ticks_msec()
+	var deadline := started + int(DEADLINE_S * 1000.0)
 	while true:
+		if _left_s(deadline) < MIN_ATTEMPT_S:
+			return _failure("timeout", UiStrings.NO_LINK)
 		var body := build_body(wav, thinking)
 		var outcome: Dictionary = await _post(body)
 		var transport_error := str(outcome.get("error", ""))
 		if transport_error == "timeout" or transport_error == "offline":
-			if transport_error == "timeout" and attempt < TRANSIENT_RETRIES:
-				attempt += 1
-				await _pause(1.0)
+			if net_retries < NET_RETRIES and _left_s(deadline) >= (3.0 if net_retries > 0 else 1.0) + MIN_ATTEMPT_S:
+				var pause := 1.0 if net_retries == 0 else 3.0
+				net_retries += 1
+				await _pause(pause)
 				continue
-			return _failure(transport_error, "Распознавание не ответило.")
+			return _failure(transport_error, UiStrings.NO_LINK)
 		var status := int(outcome.get("status", 0))
 		var raw := str(outcome.get("body", ""))
 		_log(status, raw)
@@ -54,8 +63,8 @@ func transcribe(wav: PackedByteArray) -> Dictionary:
 		if status == 400 and reason.to_lower().contains("thinking") and thinking != "off":
 			thinking = "LOW" if thinking == "MINIMAL" else "off"
 			continue
-		if (status == 429 or status == 503 or status == 502 or status == 504) and attempt < TRANSIENT_RETRIES:
-			attempt += 1
+		if (status == 429 or status == 503 or status == 502 or status == 504) and transient_retries < TRANSIENT_RETRIES:
+			transient_retries += 1
 			await _pause(_retry_delay(raw))
 			continue
 		if status == 401 or status == 403:
@@ -114,6 +123,10 @@ func _post(body: Dictionary) -> Dictionary:
 	var payload := JSON.stringify(body)
 	TurnTiming.mark("stt_sent")
 	return await transport.call("request", url, headers, payload, TIMEOUT_S)
+
+
+func _left_s(deadline: int) -> float:
+	return maxf(0.0, float(deadline - Time.get_ticks_msec()) / 1000.0)
 
 
 func _log(status: int, body: String) -> void:
