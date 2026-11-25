@@ -67,8 +67,15 @@ class Agent:
 	## Не описывать тембр, возраст, пол и акцент: из-за этого голос плывёт между репликами.
 	## Пусто — стиль только из интонации реплики. Значение заполняет автор дела, не код.
 	var voice_style: String = ""
-	## Короткое приветствие для синтеза. Пусто — заранее ничего не готовим.
+	## Короткое приветствие. Пусто — заранее ничего не готовим и первая фраза не звучит.
 	var greeting: String = ""
+	## never | sometimes | often. Пусто читается как never.
+	var profanity: String = "never"
+	var wants: String = ""
+	var fears: String = ""
+	var own_version: String = ""
+	var life_details: String = ""
+	var sample_lines: Array[String] = []
 	var relationships: Dictionary = {}
 	var facts: Array[Fact] = []
 

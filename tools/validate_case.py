@@ -108,6 +108,9 @@ def validate(case):
         gender = a.get("gender") or ""
         if gender not in ("", "male", "female"):
             err(f"агент {aid}: gender '{gender}' не male/female")
+        profanity = a.get("profanity") or ""
+        if profanity not in ("", "never", "sometimes", "often"):
+            err(f"агент {aid}: profanity '{profanity}' не never/sometimes/often")
         tts_voice = a.get("tts_voice") or ""
         if tts_voice and not (tts_voice[:1].isalpha() and tts_voice.isalnum() and 2 <= len(tts_voice) <= 32):
             err(f"агент {aid}: tts_voice '{tts_voice}' не имя голоса")

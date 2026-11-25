@@ -308,6 +308,9 @@ func open_agent(next_id: String) -> void:
 	if agent_id != "" and next_id != agent_id:
 		Speaker.cancel_inflight()
 	agent_id = next_id
+	var greeting := Game.add_greeting(next_id)
+	if greeting != "":
+		Speaker.speak_greeting(next_id, greeting)
 	if not _feeds.has(next_id):
 		_feeds[next_id] = _saved_lines(next_id)
 	_render_header()

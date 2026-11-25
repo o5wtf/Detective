@@ -217,6 +217,8 @@ func _apply_hint() -> void:
 
 
 func _backend_name() -> String:
+	if SettingsStore.load_current().stt_backend == "parakeet":
+		return "parakeet"
 	return "gemini"
 
 

@@ -108,6 +108,23 @@ func continue_case(path: String) -> Dictionary:
 	return {"ok": true, "reason": ""}
 
 
+## Первая фраза персонажа. Не ход: talked_to и turn не меняются.
+func add_greeting(agent_id: String) -> String:
+	if is_busy or case_data == null or state == null or not _dialogues.has(agent_id):
+		return ""
+	var agent: CaseData.Agent = case_data.agent_by_id.get(agent_id) as CaseData.Agent
+	if agent == null or agent.greeting.strip_edges() == "":
+		return ""
+	var dialogue: DialogueState = _dialogues[agent_id]
+	if not dialogue.messages.is_empty():
+		return ""
+	var text := agent.greeting.strip_edges()
+	dialogue.append_message("agent", text, state.turn)
+	_sync_dialogues()
+	_autosave()
+	return text
+
+
 func _turn(agent_id: String, player_text: String, event_note: String, evidence_id: String) -> void:
 	if is_busy:
 		return

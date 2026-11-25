@@ -90,6 +90,13 @@ static func _agent(raw: Dictionary) -> CaseData.Agent:
 	agent.tts_voice = _string(raw.get("tts_voice"))
 	agent.voice_style = _string(raw.get("voice_style"))
 	agent.greeting = _string(raw.get("greeting"))
+	var profanity := _string(raw.get("profanity"))
+	agent.profanity = profanity if profanity != "" else "never"
+	agent.wants = _string(raw.get("wants"))
+	agent.fears = _string(raw.get("fears"))
+	agent.own_version = _string(raw.get("own_version"))
+	agent.life_details = _string(raw.get("life_details"))
+	agent.sample_lines = _strings(raw.get("sample_lines"))
 	if raw.get("relationships") is Dictionary:
 		agent.relationships = (raw.get("relationships") as Dictionary).duplicate(true)
 	for fact_raw in _array(raw.get("facts")):

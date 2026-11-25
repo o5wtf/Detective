@@ -124,6 +124,44 @@ func test_settings_cache_matches_the_file_and_drops_after_each_writer() -> void:
 	SettingsStore.invalidate_cache()
 
 
+func test_profanity_setting_survives_save_and_defaults_off() -> void:
+	var path := SettingsStore.PATH
+	var previous := FileAccess.get_file_as_string(path) if FileAccess.file_exists(path) else ""
+	SettingsStore.save_value("dialogue", "profanity", true)
+	var loaded := SettingsStore.load_current()
+	assert_true(loaded.profanity)
+	assert_true(loaded.detached().profanity)
+	SettingsStore.save_values("mock", "cache-marker", "gemini-3.5-flash-lite", 1.0)
+	assert_true(SettingsStore.load_current().profanity)
+	var file := ConfigFile.new()
+	assert_eq(file.load(path), OK)
+	file.set_value("dialogue", "profanity", "true")
+	file.save(path)
+	SettingsStore.invalidate_cache()
+	assert_false(SettingsStore.load_current().profanity)
+	file.erase_section_key("dialogue", "profanity")
+	file.save(path)
+	SettingsStore.invalidate_cache()
+	assert_false(SettingsStore.load_current().profanity)
+	var root: Window = (Engine.get_main_loop() as SceneTree).root
+	var screen := (load("res://ui/screens/settings.tscn") as PackedScene).instantiate()
+	root.add_child(screen)
+	await (Engine.get_main_loop() as SceneTree).process_frame
+	var box := screen.find_child("ProfanityEnabled", true, false) as CheckBox
+	assert_false(box.button_pressed)
+	box.button_pressed = true
+	assert_true(SettingsStore.load_current().profanity)
+	assert_eq(box.text, GameLanguage.text("profanity_label"))
+	screen.free()
+	if previous == "":
+		DirAccess.remove_absolute(path)
+	else:
+		var restore := FileAccess.open(path, FileAccess.WRITE)
+		restore.store_string(previous)
+		restore.close()
+	SettingsStore.invalidate_cache()
+
+
 func test_remarks_have_no_digits() -> void:
 	for band_name in ["calm", "tense", "nervous", "breaking"]:
 		for emotion in Balance.EMOTIONS:

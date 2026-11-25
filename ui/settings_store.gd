@@ -32,6 +32,8 @@ var mic_pause_ms: int = 700
 var developer: bool = false
 ## gemini | parakeet. system и неизвестное читаются как gemini.
 var stt_backend: String = "gemini"
+## Мат в репликах, если у персонажа sometimes или often.
+var profanity: bool = false
 
 static var _cached: SettingsStore
 static var _cached_hash: String = ""
@@ -81,6 +83,10 @@ static func load_current() -> SettingsStore:
 		store.mic_pause_ms = clampi(int(file.get_value("mic", "pause_ms")), 400, 2000)
 	if loaded and file.has_section_key("llm", "developer"):
 		store.developer = bool(file.get_value("llm", "developer"))
+	var raw_profanity: Variant = false
+	if loaded and file.has_section_key("dialogue", "profanity"):
+		raw_profanity = file.get_value("dialogue", "profanity")
+	store.profanity = typeof(raw_profanity) == TYPE_BOOL and raw_profanity
 	var raw_stt := "gemini"
 	if loaded:
 		raw_stt = str(file.get_value("mic", "stt", "gemini"))
@@ -114,6 +120,7 @@ func detached() -> SettingsStore:
 	copy.mic_pause_ms = mic_pause_ms
 	copy.developer = developer
 	copy.stt_backend = stt_backend
+	copy.profanity = profanity
 	return copy
 
 
@@ -129,6 +136,14 @@ static func canonical_engine(engine: String) -> String:
 
 static func canonical_stt(backend: String) -> String:
 	return "parakeet" if backend.strip_edges() == "parakeet" else "gemini"
+
+
+static func save_value(section: String, key: String, value: Variant) -> void:
+	var file := ConfigFile.new()
+	file.load(PATH)
+	file.set_value(section, key, value)
+	invalidate_cache()
+	file.save(PATH)
 
 
 static func save_values(provider: String, api_key: String, dialogue_model: String, text_scale: float, timing_debug: Variant = null, voice_enabled: Variant = null, voice_engine: Variant = null, voice_intonation: Variant = null, mic_enabled: Variant = null, mic_mode: Variant = null, stt_backend: Variant = null, stt_offline: Variant = null, tts_model: Variant = null, tts_auto: Variant = null, chirp_key: Variant = null, mic_pause_ms: Variant = null, developer: Variant = null) -> void:

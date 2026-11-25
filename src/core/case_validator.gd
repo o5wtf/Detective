@@ -154,6 +154,9 @@ static func _validate_agent(agent: Dictionary, agent_ids: Dictionary, errors: Ar
 	var gender := _string_or_empty(agent.get("gender"))
 	if gender != "" and gender != "male" and gender != "female":
 		errors.append(error("agent_gender", "агент %s: gender '%s' не male/female" % [agent_id, gender]))
+	var profanity := _string_or_empty(agent.get("profanity"))
+	if profanity != "" and profanity != "never" and profanity != "sometimes" and profanity != "often":
+		errors.append(error("agent_profanity", "агент %s: profanity '%s' не never/sometimes/often" % [agent_id, profanity]))
 	var tts_voice := _string_or_empty(agent.get("tts_voice"))
 	if tts_voice != "" and not _voice_name_ok(tts_voice):
 		errors.append(error("agent_tts_voice", "агент %s: tts_voice '%s' не имя голоса" % [agent_id, tts_voice]))
