@@ -33,7 +33,7 @@ static func to_pcm16k(pcm: PackedByteArray, mix_rate: int, stereo: bool) -> Pack
 	var rate := mix_rate if mix_rate > 0 else UPLOAD_RATE
 	if rate == UPLOAD_RATE:
 		return single
-	return resample(single, rate, UPLOAD_RATE)
+	return capture_chunk(single, rate, {}).pcm
 
 
 static func resample(pcm: PackedByteArray, from_rate: int, to_rate: int) -> PackedByteArray:
@@ -77,6 +77,55 @@ static func from_vectors(frames: PackedVector2Array) -> PackedByteArray:
 	return out
 
 
+const FIR_TAPS := 31
+const FIR_CUTOFF := 7000.0
+const TARGET_PEAK := 23197
+const MAX_GAIN := 4.0
+
+static var _kernels: Dictionary = {}
+
+
+static func capture_chunk(pcm: PackedByteArray, from_rate: int, state: Dictionary) -> Dictionary:
+	var rate := from_rate if from_rate > 0 else UPLOAD_RATE
+	if rate <= UPLOAD_RATE:
+		return {"pcm": pcm, "state": {"history": PackedFloat32Array(), "origin": 0, "prev": 0.0, "has_prev": false}}
+	var history: PackedFloat32Array = state.get("history", PackedFloat32Array())
+	var origin := int(state.get("origin", 0))
+	var prev := float(state.get("prev", 0.0))
+	var has_prev: bool = state.get("has_prev", false) == true
+	var filtered := _fir(_floats(pcm), history, _kernel(rate))
+	var samples: PackedFloat32Array = filtered.samples
+	var span := _resample_span(samples, rate, UPLOAD_RATE, origin, prev, has_prev)
+	var next_prev := prev
+	var next_has := has_prev
+	if samples.size() > 0:
+		next_prev = samples[samples.size() - 1]
+		next_has = true
+	return {
+		"pcm": _from_floats(span),
+		"state": {
+			"history": filtered.history,
+			"origin": origin + samples.size(),
+			"prev": next_prev,
+			"has_prev": next_has,
+		},
+	}
+
+
+static func normalize_speech(pcm: PackedByteArray) -> PackedByteArray:
+	var loudest := peak(pcm)
+	if loudest <= 0 or loudest >= TARGET_PEAK:
+		return pcm
+	var gain := minf(float(TARGET_PEAK) / float(loudest), MAX_GAIN)
+	var frames := pcm.size() / 2
+	var out := PackedByteArray()
+	out.resize(pcm.size())
+	for index in frames:
+		var value := int(round(float(sample_at(pcm, index)) * gain))
+		put_sample(out, index, clampi(value, -32768, 32767))
+	return out
+
+
 static func peak(pcm: PackedByteArray) -> int:
 	var best := 0
 	var frames := pcm.size() / 2
@@ -110,6 +159,110 @@ static func put_sample(pcm: PackedByteArray, index: int, value: int) -> void:
 	var at := index * 2
 	pcm[at] = stored & 255
 	pcm[at + 1] = (stored >> 8) & 255
+
+
+static func _kernel(rate: int) -> PackedFloat32Array:
+	if _kernels.has(rate):
+		return _kernels[rate]
+	var mid := FIR_TAPS / 2
+	var cutoff := FIR_CUTOFF / float(rate)
+	var kernel := PackedFloat32Array()
+	kernel.resize(FIR_TAPS)
+	var total := 0.0
+	for index in FIR_TAPS:
+		var offset := float(index - mid)
+		var sinc := 2.0 * cutoff
+		if offset != 0.0:
+			sinc = sin(TAU * cutoff * offset) / (PI * offset)
+		var window := 0.54 - 0.46 * cos(TAU * float(index) / float(FIR_TAPS - 1))
+		var value := sinc * window
+		kernel[index] = value
+		total += value
+	if total != 0.0:
+		for index in FIR_TAPS:
+			kernel[index] = kernel[index] / total
+	_kernels[rate] = kernel
+	return kernel
+
+
+static func _floats(pcm: PackedByteArray) -> PackedFloat32Array:
+	var frames := pcm.size() / 2
+	var out := PackedFloat32Array()
+	out.resize(frames)
+	for index in frames:
+		out[index] = float(sample_at(pcm, index))
+	return out
+
+
+static func _from_floats(samples: PackedFloat32Array) -> PackedByteArray:
+	var out := PackedByteArray()
+	out.resize(samples.size() * 2)
+	for index in samples.size():
+		put_sample(out, index, clampi(int(round(samples[index])), -32768, 32767))
+	return out
+
+
+static func _fir(samples: PackedFloat32Array, history: PackedFloat32Array, kernel: PackedFloat32Array) -> Dictionary:
+	var keep := kernel.size() - 1
+	var padded := PackedFloat32Array()
+	if history.is_empty():
+		padded.resize(keep)
+	else:
+		padded.append_array(history)
+	padded.append_array(samples)
+	var out := PackedFloat32Array()
+	out.resize(samples.size())
+	for index in samples.size():
+		var acc := 0.0
+		for tap in kernel.size():
+			acc += padded[index + tap] * kernel[tap]
+		out[index] = acc
+	var next := PackedFloat32Array()
+	if padded.size() >= keep:
+		next = padded.slice(padded.size() - keep)
+	else:
+		next = padded
+	return {"samples": out, "history": next}
+
+
+static func _resample_span(samples: PackedFloat32Array, from_rate: int, to_rate: int, origin: int, prev: float, has_prev: bool) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	if samples.is_empty() or from_rate <= 0 or to_rate <= 0:
+		return out
+	var start := origin
+	var finish := origin + samples.size()
+	var index := 0
+	if start > 0:
+		index = int(floor(float(start) * float(to_rate) / float(from_rate)))
+	var guard := 0
+	var limit := samples.size() + 4
+	while guard < limit:
+		guard += 1
+		var source := float(index) * float(from_rate) / float(to_rate)
+		if source >= float(finish):
+			break
+		var left := int(floor(source))
+		var right := left + 1
+		if right < start:
+			index += 1
+			continue
+		if right >= finish:
+			break
+		var frac := source - float(left)
+		var first := _span_at(samples, left, start, prev, has_prev)
+		var second := _span_at(samples, right, start, prev, has_prev)
+		out.append(first + (second - first) * frac)
+		index += 1
+	return out
+
+
+static func _span_at(samples: PackedFloat32Array, index: int, start: int, prev: float, has_prev: bool) -> float:
+	var local := index - start
+	if local >= 0 and local < samples.size():
+		return samples[local]
+	if local == -1 and has_prev:
+		return prev
+	return 0.0
 
 
 static func _ascii(buffer: PackedByteArray, at: int, text: String) -> void:

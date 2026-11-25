@@ -23,7 +23,10 @@ var locked: bool = false
 var state_name: String = STATE_IDLE
 var last_wav: PackedByteArray = PackedByteArray()
 var submit: Callable = Callable()
+var hint_source: Callable = Callable()
 var _holding: bool = false
+var _tailing: bool = false
+var _queued_tail: PackedByteArray = PackedByteArray()
 var _generation: int = 0
 
 
@@ -42,9 +45,13 @@ func press() -> bool:
 
 func push_pcm(pcm: PackedByteArray, force_limit: bool = false) -> String:
 	if not screen_active:
-		if _holding:
+		if _holding or _tailing:
 			cancel()
 		return "hidden"
+	if _tailing:
+		if not pcm.is_empty():
+			clip.push_hold(pcm)
+		return "tail"
 	if not _holding:
 		clip.push_preroll(pcm)
 		return "preroll"
@@ -63,6 +70,7 @@ func push_pcm(pcm: PackedByteArray, force_limit: bool = false) -> String:
 func release(force_send: bool = false) -> Dictionary:
 	if not _holding and not force_send:
 		return {"action": "idle"}
+	var over_limit := clip.hold_ms() >= float(MicClip.MAX_MS)
 	_holding = false
 	level_changed.emit(0.0)
 	TurnTiming.mark("release")
@@ -78,23 +86,22 @@ func release(force_send: bool = false) -> Dictionary:
 			await _apply(live)
 		TurnTiming.publish()
 		return {"action": "send", "reason": "speech", "wav": PackedByteArray()}
-	var decision := clip.end(force_send)
-	if str(decision.get("action", "")) != "send":
-		_set_state(STATE_IDLE)
-		var reason := str(decision.get("reason", ""))
-		hint_changed.emit("Тишина в записи." if reason == "quiet" else "Слишком коротко, не отправлено.")
-		return decision
-	last_wav = VoiceAudio.wav_bytes(decision.get("pcm", PackedByteArray()), VoiceAudio.UPLOAD_RATE)
-	_save_last(last_wav)
-	TurnTiming.mark("audio_ready")
-	await _recognize(last_wav)
-	decision["wav"] = last_wav
-	return decision
+	if not force_send and not over_limit:
+		var token := _generation
+		_tailing = true
+		locked = true
+		_set_state(STATE_RECOGNIZING)
+		var kept := await _await_tail(token)
+		_tailing = false
+		if not kept:
+			return {"action": "discard", "reason": "cancel"}
+	return await _finish_clip(force_send)
 
 
 func cancel() -> void:
 	_generation += 1
 	_holding = false
+	_tailing = false
 	clip.cancel()
 	if stt != null:
 		stt.cancel_listen()
@@ -117,10 +124,49 @@ func retry() -> void:
 	await _recognize(last_wav)
 
 
+func _finish_clip(force_send: bool) -> Dictionary:
+	var decision := clip.end(force_send)
+	if str(decision.get("action", "")) != "send":
+		_set_state(STATE_IDLE)
+		locked = false
+		var reason := str(decision.get("reason", ""))
+		hint_changed.emit("Тишина в записи." if reason == "quiet" else "Слишком коротко, не отправлено.")
+		return decision
+	var pcm: PackedByteArray = decision.get("pcm", PackedByteArray())
+	last_wav = VoiceAudio.wav_bytes(pcm, VoiceAudio.UPLOAD_RATE)
+	_save_last(last_wav)
+	TurnTiming.mark("audio_ready")
+	await _recognize(last_wav)
+	decision["wav"] = last_wav
+	return decision
+
+
+func _await_tail(token: int) -> bool:
+	var tree := get_tree()
+	if tree == null:
+		return token == _generation
+	if not _queued_tail.is_empty():
+		clip.push_hold(_queued_tail)
+		_queued_tail = PackedByteArray()
+	var started := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - started < MicClip.TAIL_MS:
+		if token != _generation or not _tailing:
+			return false
+		if character_busy or not screen_active:
+			cancel()
+			return false
+		await tree.process_frame
+	if token != _generation or not _tailing:
+		return false
+	await tree.process_frame
+	return token == _generation and _tailing
+
+
 func _recognize(wav: PackedByteArray) -> void:
 	var token := _generation
 	locked = true
 	_set_state(STATE_RECOGNIZING)
+	_apply_hint()
 	var result := {"ok": false, "text": "", "error": "offline"}
 	if stt != null:
 		# Godot 4.7 обрывает вызывающего, если корутина наследника вызвана без await.
@@ -163,6 +209,11 @@ func _apply(result: Dictionary) -> void:
 
 func _is_live() -> bool:
 	return stt != null and stt.has_method("listens_live") and stt.listens_live()
+
+
+func _apply_hint() -> void:
+	if stt != null and stt.has_method("set_hint") and hint_source.is_valid():
+		stt.set_hint(str(hint_source.call()))
 
 
 func _backend_name() -> String:

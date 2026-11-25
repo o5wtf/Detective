@@ -160,6 +160,8 @@ func _ready() -> void:
 	_access = MicAccess.new()
 	add_child(_access)
 	_talk.submit = _send_text
+	_talk.hint_source = _stt_hint
+	_hands.hint_source = _stt_hint
 	_talk.state_changed.connect(_on_mic_state)
 	_talk.hint_changed.connect(_on_mic_hint)
 	_talk.level_changed.connect(_on_mic_level)
@@ -533,6 +535,19 @@ func _refresh_mic_button() -> void:
 		_mic_state.text = UiStrings.MIC_ANSWER
 	else:
 		_mic_state.text = ""
+
+
+func _stt_hint() -> String:
+	var last_line := ""
+	if Game.state != null:
+		var saved: Variant = Game.state.dialogues.get(agent_id, {})
+		if saved is Dictionary:
+			var messages: Variant = (saved as Dictionary).get("messages", [])
+			if messages is Array:
+				for message in messages:
+					if message is Dictionary and str((message as Dictionary).get("role", "")) == "agent":
+						last_line = str((message as Dictionary).get("text", ""))
+	return SttHint.for_turn(SettingsStore.load_current().stt_backend, Game.case_data, Game.state, agent_id, last_line)
 
 
 func _hands_free() -> bool:

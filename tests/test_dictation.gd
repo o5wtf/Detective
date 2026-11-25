@@ -60,12 +60,36 @@ func test_sixty_seconds_sends_audio_with_preroll() -> void:
 	talk.free()
 
 
+func test_tail_audio_is_kept_and_cancel_drops_it() -> void:
+	var talk := _talk()
+	assert_true(talk.press())
+	var hold := VoiceAudio.tone(VoiceAudio.UPLOAD_RATE, 4000)
+	talk.push_pcm(hold)
+	talk._queued_tail = VoiceAudio.tone(int(float(VoiceAudio.UPLOAD_RATE) * 0.2), 5000)
+	var decision: Dictionary = await talk.release(false)
+	assert_eq(str(decision.get("action", "")), "send")
+	assert_true(talk.last_wav.size() > 44 + hold.size())
+	assert_eq((_scripted(talk) as ScriptedStt).calls, 1)
+	assert_true(talk.press())
+	talk.push_pcm(VoiceAudio.tone(VoiceAudio.UPLOAD_RATE, 4000))
+	talk.call_deferred("cancel")
+	await talk.release(false)
+	assert_eq((_scripted(talk) as ScriptedStt).calls, 1)
+	talk.free()
+
+
 func test_junk_filter_blocks_empty_punctuation_and_markers() -> void:
 	assert_true(SpeechJunk.is_junk(""))
 	assert_true(SpeechJunk.is_junk("  ...?! "))
 	assert_true(SpeechJunk.is_junk("[music]"))
 	assert_true(SpeechJunk.is_junk("неразборчиво"))
 	assert_false(SpeechJunk.is_junk("Где вы были?"))
+	assert_true(SpeechJunk.is_junk("00:00"))
+	assert_true(SpeechJunk.is_junk("1:10"))
+	assert_true(SpeechJunk.is_junk("12"))
+	assert_true(SpeechJunk.is_junk("—"))
+	assert_false(SpeechJunk.is_junk("Где вы были в 1:10?"))
+	assert_false(SpeechJunk.is_junk("Да"))
 	var talk := _talk()
 	(_scripted(talk) as ScriptedStt).payload = {"ok": true, "text": "...", "error": "", "usage": {}}
 	var sent: Array[String] = []
@@ -137,7 +161,7 @@ func test_stt_body_has_audio_and_no_key() -> void:
 	var body := GeminiStt.build_body(wav, "MINIMAL")
 	var encoded := JSON.stringify(body)
 	assert_true(encoded.contains("audio/wav"))
-	assert_true(encoded.contains(GeminiStt.PROMPT))
+	assert_true(encoded.contains(GameLanguage.text("stt_prompt")))
 	assert_true(encoded.contains("MINIMAL"))
 	assert_false(encoded.contains(secret))
 	assert_false(encoded.contains("x-goog-api-key"))
