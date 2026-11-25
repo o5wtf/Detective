@@ -226,8 +226,11 @@ func test_filler_waits_until_dialogue_sent_plus_the_delay() -> void:
 	assert_true(mock.waiting_at_generate)
 	assert_true(Speaker._filler_waiting)
 	assert_eq(Speaker.filler_line, "")
-	Speaker.stop_filler()
+	Speaker.stop_and_clear()
+	assert_eq(Speaker.queue.current_id, "")
+	assert_true(Speaker.queue.pending.is_empty())
 	FillerBank.delay_ms = 180
+	FillerBank.last_line = ""
 	var started := Time.get_ticks_msec()
 	Speaker.arm_filler("mira_belova")
 	await (Engine.get_main_loop() as SceneTree).create_timer(0.08).timeout
