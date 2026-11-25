@@ -8,6 +8,7 @@ const PREROLL_MS := 300
 const TAP_MS := 300
 const MAX_MS := 60000
 const ENERGY := 400
+const TAIL_MS := 300
 
 var preroll: PackedByteArray = PackedByteArray()
 var hold: PackedByteArray = PackedByteArray()
@@ -56,7 +57,7 @@ func end(force_send: bool) -> Dictionary:
 	pcm.append_array(hold)
 	hold = PackedByteArray()
 	preroll = PackedByteArray()
-	return {"action": "send", "reason": "long" if force_send else "speech", "pcm": pcm}
+	return {"action": "send", "reason": "long" if force_send else "speech", "pcm": VoiceAudio.normalize_speech(pcm)}
 
 
 func cancel() -> void:

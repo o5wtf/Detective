@@ -4,7 +4,7 @@ extends SttBackend
 
 
 const MODEL := "gemini-3.5-flash-lite"
-const PROMPT := "Дословно расшифруй русскую речь. Верни только текст. Если речи нет, верни пустую строку."
+const PROMPT := "Дословно расшифруй русскую речь. Верни только текст. Если речи нет или слышен только шум, верни пустой ответ: без цифр, времени, пояснений и знаков."
 const TIMEOUT_S := 8.0
 const DEADLINE_S := 25.0
 const NET_RETRIES := 2
@@ -13,6 +13,7 @@ const MIN_ATTEMPT_S := 3.0
 
 var model: String = MODEL
 var api_key: String = ""
+var hint: String = ""
 var transport: Object = null
 var _instant: bool = false
 var _clock_s: float = 0.0
@@ -40,7 +41,7 @@ func transcribe(wav: PackedByteArray) -> Dictionary:
 	while true:
 		if _left_s(deadline) < MIN_ATTEMPT_S:
 			return _failure("timeout", UiStrings.NO_LINK)
-		var body := build_body(wav, thinking)
+		var body := build_body(wav, thinking, hint)
 		var outcome: Dictionary = await _post(body)
 		var transport_error := str(outcome.get("error", ""))
 		if transport_error == "timeout" or transport_error == "offline":
@@ -73,23 +74,44 @@ func transcribe(wav: PackedByteArray) -> Dictionary:
 	return _failure("bad_response", "Распознавание не удалось.")
 
 
-static func build_body(wav: PackedByteArray, thinking: String) -> Dictionary:
+func set_hint(text: String) -> void:
+	hint = text
+
+
+static func build_body(wav: PackedByteArray, thinking: String, hint_text: String = "") -> Dictionary:
 	var generation := {
 		"temperature": 0.0,
 		"maxOutputTokens": 512,
 	}
 	if thinking != "off":
 		generation["thinkingConfig"] = {"thinkingLevel": thinking}
+	var parts: Array = [
+		{"inlineData": {"mimeType": "audio/wav", "data": Marshalls.raw_to_base64(wav)}},
+		{"text": GameLanguage.text("stt_prompt")},
+	]
+	var extra := hint_text.strip_edges()
+	if extra != "":
+		parts.append({"text": extra})
 	return {
 		"contents": [{
 			"role": "user",
-			"parts": [
-				{"inlineData": {"mimeType": "audio/wav", "data": Marshalls.raw_to_base64(wav)}},
-				{"text": PROMPT},
-			],
+			"parts": parts,
 		}],
 		"generationConfig": generation,
 	}
+
+
+static func log_line(model_name: String, status: int, body: String) -> String:
+	var usage := {}
+	var parsed: Variant = JSON.parse_string(body)
+	if parsed is Dictionary:
+		usage = _usage(parsed)
+	return "stt model=%s http=%d prompt_tokens=%d output_tokens=%d" % [
+		model_name,
+		status,
+		int(usage.get("prompt", 0)),
+		int(usage.get("output", 0)),
+	]
 
 
 static func parse_transcript(body: String) -> Dictionary:
@@ -130,16 +152,7 @@ func _left_s(deadline: int) -> float:
 
 
 func _log(status: int, body: String) -> void:
-	var usage := {}
-	var parsed: Variant = JSON.parse_string(body)
-	if parsed is Dictionary:
-		usage = _usage(parsed)
-	print("stt model=%s http=%d prompt_tokens=%d output_tokens=%d" % [
-		model,
-		status,
-		int(usage.get("prompt", 0)),
-		int(usage.get("output", 0)),
-	])
+	print(log_line(model, status, body))
 
 
 func _pause(seconds: float) -> void:

@@ -22,7 +22,7 @@
 
 ## Локальное распознавание
 
-В APK для arm64-v8a добавляются `libsherpa-onnx-jni.so` и `libonnxruntime.so` из официального `sherpa-onnx-2.0.3.aar` (проверка SHA-256 в `tools/fetch_sherpa_android.py`). Несжатыми это около 28 МБ, в APK около 10 МБ. Веса модели Parakeet в пакет не входят: их игра качает сама. Перед локальным экспортом Android нужна та же команда, что выполняет CI: `python3 tools/fetch_sherpa_android.py`.
+В APK для arm64-v8a добавляются `libsherpa-onnx-jni.so` и `libonnxruntime.so` из официального `sherpa-onnx-2.0.3.aar` (проверка SHA-256 в `tools/fetch_sherpa_android.py`). Установленный APK из‑за них больше примерно на 27 МБ (106,65 МБ против 78,65 МБ до библиотеки): .so лежат в пакете без сжатия. Около 10 МБ — это только их сжатый архив, не размер APK. Веса модели Parakeet в пакет не входят: их игра качает сама. Перед локальным экспортом Android нужна та же команда, что выполняет CI: `python3 tools/fetch_sherpa_android.py`.
 
 ## Windows
 

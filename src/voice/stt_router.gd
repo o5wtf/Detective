@@ -7,6 +7,11 @@ var cloud: SttBackend
 var local: LocalStt
 
 
+func set_hint(text: String) -> void:
+	if cloud != null and cloud.has_method("set_hint"):
+		cloud.set_hint(text)
+
+
 func transcribe(wav: PackedByteArray) -> Dictionary:
 	if SettingsStore.load_current().stt_backend == "parakeet" and local != null:
 		return await local.transcribe(wav)

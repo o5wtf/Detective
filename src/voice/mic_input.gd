@@ -32,6 +32,7 @@ var _capture: AudioEffectCapture
 var _player: AudioStreamPlayer
 var _bus := -1
 var _silent_ms := 0.0
+var _capture_state: Dictionary = {}
 
 
 static func preferred_api() -> String:
@@ -81,6 +82,7 @@ func stop() -> void:
 	if _player != null and is_instance_valid(_player):
 		_player.stop()
 	api_name = ""
+	_capture_state = {}
 	_remember()
 
 
@@ -97,7 +99,7 @@ func read_pcm() -> PackedByteArray:
 		else:
 			frames = AudioServer.get_input_frames(available)
 		var pcm := VoiceAudio.from_vectors(frames)
-		return VoiceAudio.to_pcm16k(pcm, _mix_rate(), false)
+		return _capture_pcm(pcm, _mix_rate())
 	if _capture == null:
 		return PackedByteArray()
 	var chunk := _capture.get_buffer(_capture.get_frames_available())
@@ -107,7 +109,13 @@ func read_pcm() -> PackedByteArray:
 	pcm.resize(chunk.size() * 2)
 	for index in chunk.size():
 		VoiceAudio.put_sample(pcm, index, clampi(int(round(chunk[index].x * 32767.0)), -32768, 32767))
-	return VoiceAudio.to_pcm16k(pcm, int(AudioServer.get_mix_rate()), false)
+	return _capture_pcm(pcm, int(AudioServer.get_mix_rate()))
+
+
+func _capture_pcm(pcm: PackedByteArray, rate: int) -> PackedByteArray:
+	var step: Dictionary = VoiceAudio.capture_chunk(pcm, rate, _capture_state)
+	_capture_state = step.get("state", {})
+	return step.get("pcm", PackedByteArray())
 
 
 func begin_hold() -> void:

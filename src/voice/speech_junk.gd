@@ -1,6 +1,6 @@
 class_name SpeechJunk
 extends RefCounted
-## Пустое, только знаки или явный не-речевой ответ не отправляются персонажу.
+## Пустое, только цифры, время, знаки или явный не-речевой ответ не отправляются персонажу.
 
 
 const MARKERS: PackedStringArray = [
@@ -22,19 +22,18 @@ static func is_junk(raw: String) -> bool:
 		if text == marker:
 			return true
 	for index in text.length():
-		var code := text.unicode_at(index)
-		if _is_word(code):
+		if _is_letter(text.unicode_at(index)):
 			return false
 	return true
 
 
-static func _is_word(code: int) -> bool:
-	if code >= 48 and code <= 57:
-		return true
+static func _is_letter(code: int) -> bool:
 	if code >= 65 and code <= 90:
 		return true
 	if code >= 97 and code <= 122:
 		return true
-	if code >= 0x0400 and code <= 0x04FF:
+	if code == 0x0401 or code == 0x0451:
+		return true
+	if code >= 0x0410 and code <= 0x044F:
 		return true
 	return false

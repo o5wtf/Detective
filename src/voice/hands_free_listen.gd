@@ -22,6 +22,7 @@ var output_lock: bool = false
 var locked: bool = false
 var state_name: String = STATE_LISTEN
 var submit: Callable = Callable()
+var hint_source: Callable = Callable()
 var vad: PhraseVad = PhraseVad.new()
 var _generation: int = 0
 
@@ -101,7 +102,8 @@ func _recognize(pcm: PackedByteArray) -> void:
 	locked = true
 	_set_state(STATE_RECOGNIZE)
 	TurnTiming.begin(_backend_name())
-	var wav := VoiceAudio.wav_bytes(pcm, PhraseVad.RATE)
+	_apply_hint()
+	var wav := VoiceAudio.wav_bytes(VoiceAudio.normalize_speech(pcm), PhraseVad.RATE)
 	var result := {"ok": false, "text": "", "error": "offline"}
 	if stt != null:
 		result = await stt.transcribe(wav)
@@ -128,6 +130,11 @@ func _recognize(pcm: PackedByteArray) -> void:
 	if token != _generation:
 		return
 	_set_state(_idle_state())
+
+
+func _apply_hint() -> void:
+	if stt != null and stt.has_method("set_hint") and hint_source.is_valid():
+		stt.set_hint(str(hint_source.call()))
 
 
 func _backend_name() -> String:
