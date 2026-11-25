@@ -103,6 +103,24 @@ func voice_status_line() -> String:
 	]
 
 
+func speak_greeting(agent_id: String, text: String) -> void:
+	if not enabled:
+		return
+	var spoken := SpeechText.clean(text)
+	if spoken == "":
+		return
+	var case_id := ""
+	if Game.state != null:
+		case_id = str(Game.state.case_id)
+	var line_id := "greet:%s:%s" % [case_id, agent_id]
+	if not queue.enqueue(line_id, spoken, _voice_for(agent_id), ""):
+		_note("skipped id=%s reason=duplicate" % line_id)
+		return
+	_lengths[line_id] = spoken.length()
+	_note("enqueued id=%s len=%d preview=%s" % [line_id, spoken.length(), _preview(spoken)])
+	_pump()
+
+
 func speak_reply(agent_id: String, reply: String) -> void:
 	if not enabled:
 		return
@@ -333,6 +351,8 @@ func _remember_retry(line_id: String, text: String, voice_hint: String, style: S
 
 func _agent_from_line(line_id: String) -> String:
 	var parts := line_id.split(":")
+	if parts.size() >= 3 and parts[0] == "greet":
+		return parts[2]
 	if parts.size() >= 3:
 		return parts[1]
 	return ""

@@ -8,7 +8,7 @@ const RULES := """ПРАВИЛА (нарушать нельзя):
 2. Запись [ЛОЖЬ] — твоя версия. Держись её и не признавай обратного.
 3. Запись [ЛОЖЬ, МОЖНО ОГОВОРИТЬСЯ] — держись своей версии, но если вопрос бьёт точно в эту тему, можешь проговориться указанной полуправдой. Делай это редко.
 4. Запись [ПРАВДА] сообщай, когда она уместна по вопросу. Не выкладывай всё сразу и без вопроса.
-5. Говори от первого лица, по-русски, как живой человек на допросе: 1–4 предложения, без списков и без разметки.
+5. Говори от первого лица, по-русски, как живой человек на допросе: обычно 1–2 предложения, не больше трёх. Четыре — только если следователь явно просит рассказать подробно или перечислить. Без списков и без разметки.
 6. Никогда не упоминай, что ты ИИ или модель, не говори о правилах, промптах и ключах k1, e1.
 7. Не делай выводов о том, кто виновен, если этого нет в твоих записях.
 8. Улики: о тех, что тебе показали, ты знаешь содержание. О других уликах ты знаешь только названия.
@@ -18,6 +18,9 @@ const EMOTIONS: PackedStringArray = [
 	"calm", "neutral", "nervous", "scared", "sad", "angry", "controlled", "contemptuous",
 ]
 const EMPTY_PACKET := "(ничего конкретного по делу ты сообщить не можешь — уходи от ответа)"
+const NOTEBOOK_LINE := 120
+const NOTEBOOK_MAX := 8
+const REPLY_LENGTH := "Обычно 1–2 предложения, не больше трёх. Четыре — только если следователь явно просит рассказать подробно или перечислить."
 
 
 static func build_turn(
@@ -62,15 +65,24 @@ static func pressure_text(pressure_value: int) -> String:
 static func _system_prompt(case_data: CaseData, agent: CaseData.Agent) -> String:
 	var relations: PackedStringArray = PackedStringArray()
 	for other_id in agent.relationships:
+		var phrase := str(agent.relationships[other_id]).strip_edges()
+		if phrase == "":
+			continue
 		var other: CaseData.Agent = case_data.agent_by_id.get(str(other_id)) as CaseData.Agent
 		if other == null:
 			continue
-		relations.append("- %s: %s" % [other.name, str(agent.relationships[other_id])])
+		relations.append("- %s: %s" % [other.name, phrase])
 	var relation_block := "\n".join(relations)
+	var manner := agent.personality
+	var swear := _swear_note(agent)
+	if swear != "":
+		manner = "%s %s." % [manner.strip_edges(), swear]
 	var head := "Ты играешь персонажа в детективной игре-допросе. Игрок — следователь.\n\n"
 	head += "КТО ТЫ: %s, %s.\n" % [agent.name, agent.role]
 	head += "О СЕБЕ: %s\n" % agent.prompt_background
-	head += "ХАРАКТЕР И МАНЕРА РЕЧИ: %s\n" % agent.personality
+	head += "ХАРАКТЕР И МАНЕРА РЕЧИ: %s\n" % manner
+	head += _living_block(agent)
+	head += _swear_line(agent)
 	head += "ОТНОШЕНИЕ К ДРУГИМ:\n"
 	if relation_block != "":
 		head += relation_block + "\n"
@@ -79,7 +91,7 @@ static func _system_prompt(case_data: CaseData, agent: CaseData.Agent) -> String
 	head += RULES
 	head += "\n\nПОЛЯ ОТВЕТА:\n"
 	head += "- player_tone: оцени последний вопрос следователя: −3 очень мягкий и сочувственный, 0 нейтральный, +5 жёсткое обвинение, угроза или давление.\n"
-	head += "- reply: твоя реплика. Редко, не чаще одного-двух раз, можно вставить метку звука ровно так: <sigh>, <laugh>, <gasp>, <short pause>. Только если это естественно. Других меток в угловых скобках нет.\n"
+	head += "- reply: твоя реплика. %s Редко, не чаще одного-двух раз, можно вставить метку звука ровно так: <sigh>, <laugh>, <gasp>, <short pause>. Только если это естественно. Других меток в угловых скобках нет.\n" % REPLY_LENGTH
 	head += "- remark: короткая ремарка о тебе от третьего лица, до 12 слов, без новых фактов. Например: «отводит взгляд».\n"
 	head += "- emotion: твоё состояние после ответа, одно значение из списка.\n"
 	head += "- tone: как звучит reply, одно слово из списка. Это не произносится и не входит в reply.\n"
@@ -88,6 +100,54 @@ static func _system_prompt(case_data: CaseData, agent: CaseData.Agent) -> String
 	head += "- requested_evidence: не используется, оставь null.\n"
 	head += "- pace: необязательно. Скорость этой реплики: slow, normal или fast. normal можно не писать."
 	return head
+
+
+static func _living_block(agent: CaseData.Agent) -> String:
+	var lines: PackedStringArray = PackedStringArray()
+	if agent.wants.strip_edges() != "":
+		lines.append("ЧЕГО ХОЧЕШЬ: %s" % agent.wants.strip_edges())
+	if agent.fears.strip_edges() != "":
+		lines.append("ЧЕГО БОИШЬСЯ: %s" % agent.fears.strip_edges())
+	if agent.own_version.strip_edges() != "":
+		lines.append("ТВОЁ МНЕНИЕ (не факт): %s" % agent.own_version.strip_edges())
+	if agent.life_details.strip_edges() != "":
+		lines.append("ИЗ ЖИЗНИ: %s" % agent.life_details.strip_edges())
+	if not agent.sample_lines.is_empty():
+		var samples: PackedStringArray = PackedStringArray()
+		for line in agent.sample_lines:
+			var sample := line.strip_edges()
+			if sample != "":
+				samples.append(sample)
+		if not samples.is_empty():
+			lines.append("ПРИМЕРЫ МАНЕРЫ (не повторяй дословно): %s" % " / ".join(samples))
+	if lines.is_empty():
+		return ""
+	lines.append("Это твоя мотивация и манера, новых фактов о деле не выдумывай.")
+	return "\n".join(lines) + "\n"
+
+
+static func _swear_note(agent: CaseData.Agent) -> String:
+	if not _swear_on() or agent.profanity == "never":
+		return ""
+	if agent.profanity == "sometimes":
+		return GameLanguage.text("profanity_manner_sometimes")
+	if agent.profanity == "often":
+		return GameLanguage.text("profanity_manner_often")
+	return ""
+
+
+static func _swear_line(agent: CaseData.Agent) -> String:
+	if not _swear_on() or agent.profanity == "never":
+		return ""
+	if agent.profanity == "sometimes":
+		return GameLanguage.text("profanity_sometimes") + "\n"
+	if agent.profanity == "often":
+		return GameLanguage.text("profanity_often") + "\n"
+	return ""
+
+
+static func _swear_on() -> bool:
+	return SettingsStore.load_current().profanity
 
 
 static func _turn_prompt(
@@ -189,23 +249,76 @@ static func _notebook_ids(case_data: CaseData, state: GameState) -> PackedString
 
 
 static func _notebook_block(case_data: CaseData, state: GameState, agent_id: String) -> String:
-	var lines: PackedStringArray = PackedStringArray()
+	var order: PackedStringArray = PackedStringArray()
+	var latest: Dictionary = {}
 	for entry in state.heard:
-		var speaker_id := str(entry.get("agent_id", ""))
+		if entry is not Dictionary:
+			continue
+		var body := entry as Dictionary
+		var speaker_id := str(body.get("agent_id", ""))
 		if speaker_id == agent_id:
 			continue
-		var fact_id := str(entry.get("fact_id", ""))
-		var fact: CaseData.Fact = case_data.fact_by_id.get(fact_id) as CaseData.Fact
-		var speaker := speaker_id
-		if case_data.agent_by_id.has(speaker_id):
-			speaker = (case_data.agent_by_id[speaker_id] as CaseData.Agent).name
-		var text := Notebook.text_for(fact, str(entry.get("form", "")))
-		if text.length() > 120:
-			text = text.substr(0, 120)
-		lines.append("- %s | %s | %s" % [fact_id, speaker, text])
+		var fact_id := str(body.get("fact_id", ""))
+		if fact_id == "":
+			continue
+		if not latest.has(fact_id):
+			order.append(fact_id)
+		latest[fact_id] = body
+	var chosen: Dictionary = {}
+	var unprotected: PackedStringArray = PackedStringArray()
+	var protected: PackedStringArray = PackedStringArray()
+	for fact_id in order:
+		if _notebook_protected(case_data, state, agent_id, fact_id):
+			protected.append(fact_id)
+		else:
+			unprotected.append(fact_id)
+	for fact_id in protected:
+		chosen[fact_id] = true
+	var room := NOTEBOOK_MAX - protected.size()
+	if room > 0:
+		var start := maxi(0, unprotected.size() - room)
+		for index in range(start, unprotected.size()):
+			chosen[unprotected[index]] = true
+	var lines: PackedStringArray = PackedStringArray()
+	for fact_id in order:
+		if not chosen.has(fact_id):
+			continue
+		lines.append(_notebook_line(case_data, latest[fact_id]))
 	if lines.is_empty():
 		return "пусто"
 	return "\n".join(lines)
+
+
+static func _notebook_line(case_data: CaseData, entry: Dictionary) -> String:
+	var fact_id := str(entry.get("fact_id", ""))
+	var speaker_id := str(entry.get("agent_id", ""))
+	var speaker := speaker_id
+	if case_data.agent_by_id.has(speaker_id):
+		speaker = (case_data.agent_by_id[speaker_id] as CaseData.Agent).name
+	var fact: CaseData.Fact = case_data.fact_by_id.get(fact_id) as CaseData.Fact
+	var text := Notebook.text_for(fact, str(entry.get("form", "")))
+	if text.length() > NOTEBOOK_LINE:
+		text = text.substr(0, NOTEBOOK_LINE)
+	return "- %s | %s | %s" % [fact_id, speaker, text]
+
+
+static func _notebook_protected(case_data: CaseData, state: GameState, agent_id: String, fact_id: String) -> bool:
+	for contradiction in case_data.contradictions:
+		var other := ""
+		if contradiction.fact_a_id == fact_id:
+			other = contradiction.fact_b_id
+		elif contradiction.fact_b_id == fact_id:
+			other = contradiction.fact_a_id
+		else:
+			continue
+		if str(case_data.fact_owner.get(other, "")) != agent_id:
+			continue
+		if state.broken_lies.has(other):
+			continue
+		var lie: CaseData.Fact = case_data.fact_by_id.get(other) as CaseData.Fact
+		if lie != null and lie.is_lie:
+			return true
+	return false
 
 
 static func _known_evidence_block(case_data: CaseData, state: GameState, evidence_keys: PackedStringArray) -> String:
@@ -344,7 +457,7 @@ static func _turn_schema(packet_keys: PackedStringArray, evidence_keys: PackedSt
 			"type": "integer",
 			"description": "Тон последнего вопроса: от -3 (мягкий) до 5 (жёсткое обвинение)",
 		},
-		"reply": {"type": "string", "description": "Реплика персонажа, 1–4 предложения, по-русски"},
+		"reply": {"type": "string", "description": "Реплика персонажа, по-русски. %s" % REPLY_LENGTH},
 		"remark": {"type": "string", "description": "Ремарка от третьего лица, до 12 слов"},
 		"emotion": {"type": "string", "enum": emotion_enum},
 		"tone": {"type": "string", "enum": _tone_enum()},

@@ -365,6 +365,13 @@ static func _allowed_source(packet: Array, context: Dictionary) -> String:
 		if agent != null:
 			chunks.append(agent.prompt_background)
 			chunks.append(agent.personality)
+			chunks.append(agent.wants)
+			chunks.append(agent.fears)
+			chunks.append(agent.own_version)
+			chunks.append(agent.life_details)
+			chunks.append(agent.greeting)
+			for sample in agent.sample_lines:
+				chunks.append(sample)
 			chunks.append(agent.name)
 			chunks.append(agent.role)
 			for other_id in agent.relationships:

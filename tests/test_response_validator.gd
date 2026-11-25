@@ -109,6 +109,18 @@ func test_leak_number_and_stems() -> void:
 	assert_true(FileAccess.file_exists("user://logs/leaks.log"))
 
 
+func test_living_fields_count_as_allowed_source() -> void:
+	var packet := [_basic()]
+	var context := _context()
+	var data := _leak_case()
+	var agent: CaseData.Agent = data.agent_by_id["a"]
+	agent.wants = "Он открыл хранилище и сразу признался."
+	context["case_data"] = data
+	context["agent_id"] = "a"
+	var report := ResponseValidator.validate(_body([], "Он открыл хранилище и сразу признался."), packet, context)
+	assert_true(report["ok"], ",".join(report["violations"]))
+
+
 func test_auto_add_when_reply_names_one_packet_number() -> void:
 	var entry := _basic()
 	entry["content"] = "Встреча назначена на 19:00."

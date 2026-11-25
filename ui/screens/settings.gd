@@ -13,6 +13,7 @@ var _scale: HSlider
 var _mock: CheckBox
 var _timing: CheckBox
 var _developer: CheckBox
+var _profanity: CheckBox
 var _voice: CheckBox
 var _intonation: CheckBox
 var _engine: OptionButton
@@ -165,6 +166,13 @@ func _ready() -> void:
 	var voice_check := UiWidgets.button(UiStrings.VOICE_CHECK, "VoiceCheckButton")
 	voice_check.pressed.connect(_check_voice)
 	scroll_box.add_child(voice_check)
+	scroll_box.add_child(UiWidgets.label(GameLanguage.text("dialogue_section")))
+	_profanity = CheckBox.new()
+	_profanity.name = "ProfanityEnabled"
+	_profanity.text = GameLanguage.text("profanity_label")
+	_profanity.custom_minimum_size = Vector2(0, 48)
+	_profanity.toggled.connect(_on_profanity_toggled)
+	scroll_box.add_child(_profanity)
 	scroll_box.add_child(UiWidgets.label(UiStrings.MIC_SECTION))
 	_mic = CheckBox.new()
 	_mic.name = "MicEnabled"
@@ -294,6 +302,7 @@ func _load_fields() -> void:
 	_mock.button_pressed = store.provider == "mock"
 	_timing.button_pressed = store.timing_debug
 	_developer.button_pressed = store.developer
+	_profanity.button_pressed = store.profanity
 
 
 func _stt_value() -> String:
@@ -367,6 +376,12 @@ func _toggle_key() -> void:
 	else:
 		_key.secret = true
 		_show.text = UiStrings.SHOW_KEY
+
+
+func _on_profanity_toggled(pressed: bool) -> void:
+	if _loading:
+		return
+	SettingsStore.save_value("dialogue", "profanity", pressed)
 
 
 func _on_developer_toggled(pressed: bool) -> void:

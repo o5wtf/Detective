@@ -62,6 +62,10 @@ func test_valid_minimal_loads() -> void:
 	assert_eq(data.agents[0].facts[0].pressure_for_full, 10)
 	assert_false(data.agents[0].facts[0].is_lie)
 	assert_eq(data.agents[0].starting_emotion, "neutral")
+	assert_eq(data.agents[0].greeting, "")
+	assert_eq(data.agents[0].profanity, "never")
+	assert_eq(data.agents[0].wants, "")
+	assert_eq(data.agents[0].sample_lines.size(), 0)
 	assert_eq(data.evidence.size(), 1)
 	assert_true(data.evidence[0].unlock_condition == null)
 	assert_eq(data.victory_condition, "correct_accusation")
@@ -96,6 +100,14 @@ func test_real_case_loads() -> void:
 	assert_eq(parsed_facts, raw_facts)
 	assert_eq(data.fact_by_id.size(), raw_facts)
 	assert_eq(CaseValidator.validate(raw).size(), 0)
+	var by_id := {}
+	for agent in data.agents:
+		by_id[agent.id] = agent
+	assert_eq((by_id["irina_morozova"] as CaseData.Agent).greeting, "Следователь. Наконец-то. Давайте без соболезнований, у меня мало времени")
+	assert_eq((by_id["arkady_volkov"] as CaseData.Agent).profanity, "sometimes")
+	assert_eq((by_id["alina_kuznetsova"] as CaseData.Agent).profanity, "sometimes")
+	assert_eq((by_id["mira_belova"] as CaseData.Agent).profanity, "never")
+	assert_eq((by_id["pavel_sokolov"] as CaseData.Agent).sample_lines.size(), 3)
 	assert_eq(CaseValidator.warning_messages(raw).size(), 0)
 
 
@@ -159,6 +171,9 @@ func test_more_rules_and_warnings() -> void:
 	var one_way: Dictionary = minimal.duplicate(true)
 	one_way["evidence"][0]["related_fact_ids"] = ["f1"]
 	assert_eq(CaseValidator.validate(one_way).size(), 0)
+	var bad_profanity: Dictionary = minimal.duplicate(true)
+	bad_profanity["agents"][0]["profanity"] = "always"
+	_expect_code(bad_profanity, "agent_profanity")
 	var warnings := CaseValidator.warning_messages(one_way)
 	assert_eq(warnings.size(), 1)
 	assert_true(warnings[0].contains("не ссылается"), warnings[0])

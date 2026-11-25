@@ -4,7 +4,6 @@ extends SttBackend
 
 
 const MODEL := "gemini-3.5-flash-lite"
-const PROMPT := "Дословно расшифруй русскую речь. Верни только текст. Если речи нет или слышен только шум, верни пустой ответ: без цифр, времени, пояснений и знаков."
 const TIMEOUT_S := 8.0
 const DEADLINE_S := 25.0
 const NET_RETRIES := 2

@@ -335,6 +335,17 @@ func test_hands_free_journal_uses_the_selected_backend() -> void:
 	_restore_config(previous)
 
 
+func test_push_to_talk_journal_uses_the_selected_backend() -> void:
+	var previous := _keep_config()
+	SettingsStore.save_values("mock", "", "gemini-3.5-flash-lite", 1.0, null, null, null, null, null, null, "parakeet")
+	var talk := PushToTalk.new()
+	assert_eq(talk._backend_name(), "parakeet")
+	SettingsStore.save_values("mock", "", "gemini-3.5-flash-lite", 1.0, null, null, null, null, null, null, "gemini")
+	assert_eq(talk._backend_name(), "gemini")
+	talk.free()
+	_restore_config(previous)
+
+
 func test_background_load_stays_on_cloud_until_the_library_is_ready() -> void:
 	begin_async()
 	_use_test_dir()

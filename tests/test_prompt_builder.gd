@@ -121,11 +121,145 @@ func test_prompt_hides_unrevealed_and_foreign_secrets() -> void:
 	assert_false(prompt.contains("ЧУЖОЙ ФАКТ ПЕТРА ПОЛНОСТЬЮ"))
 
 
+func test_living_fields_follow_character_and_system_stays_fixed() -> void:
+	var data := _sample_case()
+	var ira: CaseData.Agent = data.agent_by_id["ira"]
+	ira.wants = "Хочет тишины в доме."
+	ira.fears = "Боится громких шагов."
+	ira.own_version = "Думает, что свет погас сам."
+	ira.life_details = "Коллекционирует старые ключи."
+	ira.sample_lines.append("Говорю коротко.")
+	ira.sample_lines.append("Дальше не помню.")
+	ira.relationships["empty"] = "   "
+	ira.greeting = "Это приветствие в промпт не входит."
+	var state := GameState.new()
+	var first := PromptBuilder.build_turn(data, state, "ira", [], DialogueState.new(), "Первый вопрос", "")
+	var second := PromptBuilder.build_turn(data, state, "ira", [], DialogueState.new(), "Второй вопрос", "событие")
+	assert_eq(str(first["system"]), str(second["system"]))
+	var system := str(first["system"])
+	var character := system.find("ХАРАКТЕР И МАНЕРА РЕЧИ")
+	var wants := system.find("ЧЕГО ХОЧЕШЬ: Хочет тишины в доме.")
+	var fears := system.find("ЧЕГО БОИШЬСЯ: Боится громких шагов.")
+	var opinion := system.find("ТВОЁ МНЕНИЕ (не факт): Думает, что свет погас сам.")
+	var life := system.find("ИЗ ЖИЗНИ: Коллекционирует старые ключи.")
+	var samples := system.find("ПРИМЕРЫ МАНЕРЫ (не повторяй дословно): Говорю коротко. / Дальше не помню.")
+	var rule := system.find("Это твоя мотивация и манера, новых фактов о деле не выдумывай.")
+	var relation := system.find("ОТНОШЕНИЕ К ДРУГИМ")
+	var happened := system.find("ЧТО СЛУЧИЛОСЬ")
+	var rules := system.find("ПРАВИЛА (нарушать нельзя)")
+	var fields := system.find("ПОЛЯ ОТВЕТА")
+	assert_true(character < wants and wants < fears and fears < opinion and opinion < life and life < samples and samples < rule)
+	assert_true(rule < relation and relation < happened and happened < rules and rules < fields)
+	assert_true(system.contains("- Пётр: Не доверяет ему."))
+	assert_false(system.contains("- :"))
+	assert_false(system.contains(ira.greeting))
+	assert_true(system.contains(PromptBuilder.REPLY_LENGTH))
+	assert_false(system.contains("1–4 предложения"))
+	var schema: Dictionary = first["schema"]
+	var description := str(schema["properties"]["reply"]["description"])
+	assert_true(description.contains("не больше трёх"))
+	assert_false(description.contains("1–4"))
+	assert_false(str(first["user"]).contains("ЧЕГО ХОЧЕШЬ"))
+	assert_true(str(second["user"]).contains("Второй вопрос"))
+
+
+func test_empty_relationship_is_omitted() -> void:
+	var data := _sample_case()
+	var ira: CaseData.Agent = data.agent_by_id["ira"]
+	ira.relationships = {"petr": "  "}
+	var system := str(PromptBuilder.build_turn(data, GameState.new(), "ira", [], DialogueState.new(), "Вопрос", "")["system"])
+	assert_true(system.contains("ОТНОШЕНИЕ К ДРУГИМ:"))
+	assert_false(system.contains("Пётр"))
+
+
+func test_notebook_keeps_the_last_form_and_an_unbroken_lie() -> void:
+	var data := _sample_case()
+	var contradiction := CaseData.Contradiction.new()
+	contradiction.id = "c1"
+	contradiction.fact_a_id = "foreign"
+	contradiction.fact_b_id = "must"
+	data.contradictions.append(contradiction)
+	for index in 10:
+		var fact := CaseData.Fact.new()
+		fact.id = "extra%d" % index
+		fact.content_basic = "Лишняя строка номер %d %s" % [index, "слово".repeat(40)]
+		data.fact_by_id[fact.id] = fact
+		data.fact_owner[fact.id] = "petr"
+	var state := GameState.new()
+	state.heard.append({"agent_id": "petr", "fact_id": "foreign", "form": "basic"})
+	state.heard.append({"agent_id": "petr", "fact_id": "foreign", "form": "full"})
+	for index in 10:
+		state.heard.append({"agent_id": "petr", "fact_id": "extra%d" % index, "form": "basic"})
+	state.heard.append({"agent_id": "ira", "fact_id": "visible", "form": "basic"})
+	var block := PromptBuilder._notebook_block(data, state, "ira")
+	var lines := block.split("\n")
+	assert_eq(lines.size(), PromptBuilder.NOTEBOOK_MAX)
+	assert_true(block.contains("- foreign | Пётр | ЧУЖОЙ ФАКТ ПЕТРА ПОЛНОСТЬЮ"))
+	assert_false(block.contains("ЧУЖОЙ ФАКТ ПЕТРА КРАТКО"))
+	assert_false(block.contains("extra0"))
+	assert_false(block.contains("extra2"))
+	assert_true(block.contains("extra3"))
+	assert_true(block.contains("extra9"))
+	assert_false(block.contains("visible"))
+	for line in lines:
+		if not str(line).contains("extra9"):
+			continue
+		var parts := str(line).split(" | ")
+		assert_eq(parts[2].length(), PromptBuilder.NOTEBOOK_LINE)
+	state.broken_lies.append("must")
+	var dropped := PromptBuilder._notebook_block(data, state, "ira")
+	assert_false(dropped.contains("foreign"))
+	assert_eq(dropped.split("\n").size(), PromptBuilder.NOTEBOOK_MAX)
+
+
+func test_profanity_line_follows_the_checkbox_and_the_character() -> void:
+	var path := SettingsStore.PATH
+	var previous := FileAccess.get_file_as_string(path) if FileAccess.file_exists(path) else ""
+	SettingsStore.save_value("dialogue", "profanity", false)
+	var data := _sample_case()
+	var ira: CaseData.Agent = data.agent_by_id["ira"]
+	ira.profanity = "sometimes"
+	var off := str(PromptBuilder.build_turn(data, GameState.new(), "ira", [], DialogueState.new(), "Вопрос", "")["system"])
+	assert_false(off.contains("МАТ:"))
+	assert_false(off.contains(GameLanguage.text("profanity_manner_sometimes")))
+	assert_false(off.contains("без мата"))
+	SettingsStore.save_value("dialogue", "profanity", true)
+	ira.profanity = "never"
+	var silent := str(PromptBuilder.build_turn(data, GameState.new(), "ira", [], DialogueState.new(), "Вопрос", "")["system"])
+	assert_false(silent.contains("МАТ:"))
+	assert_false(silent.contains("без мата"))
+	ira.profanity = "sometimes"
+	var sometimes := str(PromptBuilder.build_turn(data, GameState.new(), "ira", [], DialogueState.new(), "Вопрос", "")["system"])
+	var manner := sometimes.find("ХАРАКТЕР И МАНЕРА РЕЧИ")
+	var mat := sometimes.find(GameLanguage.text("profanity_sometimes"))
+	var relation := sometimes.find("ОТНОШЕНИЕ К ДРУГИМ")
+	assert_true(sometimes.contains("Говорит коротко. %s." % GameLanguage.text("profanity_manner_sometimes")))
+	assert_true(manner < mat and mat < relation)
+	assert_false(sometimes.contains(GameLanguage.text("profanity_often")))
+	assert_false(str(PromptBuilder.build_turn(data, GameState.new(), "ira", [], DialogueState.new(), "Вопрос", "")["user"]).contains("МАТ:"))
+	ira.profanity = "often"
+	var often := str(PromptBuilder.build_turn(data, GameState.new(), "ira", [], DialogueState.new(), "Вопрос", "")["system"])
+	assert_true(often.contains(GameLanguage.text("profanity_often")))
+	assert_true(often.contains(GameLanguage.text("profanity_manner_often")))
+	assert_false(often.contains(GameLanguage.text("profanity_sometimes")))
+	ira.profanity = "weekly"
+	var unknown := str(PromptBuilder.build_turn(data, GameState.new(), "ira", [], DialogueState.new(), "Вопрос", "")["system"])
+	assert_false(unknown.contains("МАТ:"))
+	if previous == "":
+		DirAccess.remove_absolute(path)
+	else:
+		var restore := FileAccess.open(path, FileAccess.WRITE)
+		restore.store_string(previous)
+		restore.close()
+	SettingsStore.invalidate_cache()
+
+
 func test_real_case_prompts_do_not_leak() -> void:
 	var loaded := CaseLoader.load_case(REAL_CASE)
 	assert_true(loaded.ok, "дело не загрузилось")
 	var data := loaded.case_data
 	for agent in data.agents:
+		_assert_living_text_does_not_copy_secrets(data, agent)
 		for mode in ["start", "tone40", "tone90", "shown"]:
 			var engine := _engine_in_mode(data, agent.id, mode)
 			var packet: Array = engine.get_packet(agent.id)
@@ -135,6 +269,8 @@ func test_real_case_prompts_do_not_leak() -> void:
 				data, engine.state, agent.id, packet, dialogue, player_text, ""
 			)
 			var prompt := str(request["system"]) + "\n" + str(request["user"])
+			if agent.greeting.strip_edges() != "":
+				assert_false(str(request["system"]).contains(agent.greeting), agent.id)
 			var allowed := _allowed(data, engine.state, agent, packet, dialogue, player_text, "")
 			_assert_case_hidden(data, engine.state, agent, packet, prompt, allowed)
 			var schema: Dictionary = request["schema"]
@@ -195,8 +331,11 @@ func _allowed(
 ) -> String:
 	var chunks: PackedStringArray = PackedStringArray([
 		agent.name, agent.role, agent.prompt_background, agent.personality,
+		agent.wants, agent.fears, agent.own_version, agent.life_details, agent.greeting,
 		data.briefing, data.intro_atmosphere, player_text, event_note, dialogue.summary,
 	])
+	for sample in agent.sample_lines:
+		chunks.append(sample)
 	for other_id in agent.relationships:
 		var other: CaseData.Agent = data.agent_by_id.get(str(other_id)) as CaseData.Agent
 		if other != null:
@@ -222,6 +361,35 @@ func _allowed(
 	for message in dialogue.recent(6):
 		chunks.append(str(message.get("text", "")))
 	return "\n".join(chunks)
+
+
+func _assert_living_text_does_not_copy_secrets(data: CaseData, agent: CaseData.Agent) -> void:
+	var fields: PackedStringArray = PackedStringArray([
+		agent.wants, agent.fears, agent.own_version, agent.life_details, agent.greeting,
+	])
+	for sample in agent.sample_lines:
+		fields.append(sample)
+	for other_id in agent.relationships:
+		fields.append(str(agent.relationships[other_id]))
+	var secrets: PackedStringArray = PackedStringArray([agent.background, data.truth_timeline])
+	for fact in agent.facts:
+		secrets.append(fact.content_basic)
+		secrets.append(fact.content_full)
+		secrets.append(fact.lie_text)
+	for other in data.agents:
+		if other.id == agent.id:
+			continue
+		secrets.append(other.background)
+		for fact in other.facts:
+			secrets.append(fact.content_basic)
+			secrets.append(fact.content_full)
+			secrets.append(fact.lie_text)
+	var joined := "\n".join(fields)
+	for secret in secrets:
+		var text := secret.strip_edges()
+		if text.length() < 12:
+			continue
+		assert_false(joined.contains(text), "%s копирует секрет: %s" % [agent.id, text.substr(0, 48)])
 
 
 func _forbid(prompt: String, allowed: String, needle: String, kind: String) -> void:
