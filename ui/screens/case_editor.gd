@@ -16,6 +16,10 @@ var _failed: Control
 var _warn: Control
 var _scroll: ScrollContainer
 var keyboard_inset := -1
+var _tab := 0
+var _hold_tab := false
+var _remove_kind := ""
+var _remove_id := ""
 
 
 func open_id(next_id: String) -> void:
@@ -58,7 +62,51 @@ func _ready() -> void:
 	add_child(_timer)
 
 
+func rebuild_editor() -> void:
+	_build()
+	_schedule()
+
+
+func ask_remove(kind: String, item_id: String) -> void:
+	if _read_only:
+		return
+	_remove_kind = kind
+	_remove_id = item_id
+	var lines := _doc.usage_lines(kind, item_id)
+	var label := find_child("DeleteText", true, false) as Label
+	if label != null:
+		if lines.is_empty():
+			label.text = "Удалить?"
+		else:
+			label.text = "Используется в %d местах:\n%s" % [lines.size(), "\n".join(lines)]
+	var dialog := find_child("DeleteConfirm", true, false)
+	if dialog != null:
+		dialog.visible = true
+
+
+func goto_issue(issue: Dictionary) -> void:
+	var target: Dictionary = issue.get("target", {})
+	var tab := str(target.get("tab", "overview"))
+	_tab = 0 if tab == "overview" else 2 if tab == "evidence" else 1
+	_hold_tab = true
+	var agent := int(target.get("agent", _agent))
+	if agent >= 0:
+		_agent = agent
+	_build()
+	var node := find_child(str(target.get("node", "")), true, false) as Control
+	if node != null:
+		_keep_visible(node)
+
+
+func _section_label(text: String) -> Control:
+	return UiWidgets.label(text)
+
+
 func _build() -> void:
+	var previous := find_child("EditorTabs", true, false) as TabContainer
+	if previous != null and not _hold_tab:
+		_tab = previous.current_tab
+	_hold_tab = false
 	for child in get_children():
 		if child == _timer:
 			continue
@@ -98,19 +146,23 @@ func _build() -> void:
 	column.add_child(tabs)
 	tabs.add_child(_overview())
 	tabs.add_child(_people())
-	tabs.add_child(_evidence_note())
+	tabs.add_child(EditorSheet.evidence_page(self))
 	tabs.set_tab_title(0, UiStrings.TAB_OVERVIEW)
 	tabs.set_tab_title(1, UiStrings.TAB_PEOPLE)
 	tabs.set_tab_title(2, UiStrings.TAB_EVIDENCE)
+	tabs.current_tab = clampi(_tab, 0, 2)
+	tabs.tab_changed.connect(func(index: int) -> void: _tab = index)
 	_help = _popup("HelpPopup")
 	_failed = _fail_popup()
 	_warn = _warn_popup()
+	var remove_dialog := _delete_popup()
 	add_child(_help)
 	add_child(_failed)
 	add_child(_warn)
+	add_child(remove_dialog)
 	_lock_if_needed()
-	var errors := UiWidgets.label("", "EditorErrors")
-	errors.add_theme_color_override("font_color", NoirTheme.GOLD)
+	var errors := VBoxContainer.new()
+	errors.name = "EditorIssues"
 	column.add_child(errors)
 	_show_errors()
 
@@ -203,17 +255,7 @@ func _fill_card(card: VBoxContainer) -> void:
 	card.add_child(_agent_area("Мелочи из жизни", "LifeEdit", "life_details", str(agent.get("life_details", "")), "Выросла в Петербурге, говорит «парадная»."))
 	_living_samples(card, agent)
 	_relationships(card, agent)
-
-
-func _evidence_note() -> Control:
-	var box := VBoxContainer.new()
-	box.name = "EvidenceTab"
-	box.add_child(UiWidgets.label(UiStrings.EVIDENCE_LATER, "EvidenceLater"))
-	var evidence: Array = _doc.raw.get("evidence", [])
-	for item in evidence:
-		if item is Dictionary:
-			box.add_child(UiWidgets.label(str((item as Dictionary).get("title", ""))))
-	return box
+	EditorSheet.add_facts(card, self)
 
 
 func _line(label: String, node_name: String, value: String, sample: String, key: String) -> Control:
@@ -586,6 +628,29 @@ func _fail_popup() -> Control:
 	return panel
 
 
+func _delete_popup() -> Control:
+	var panel := _overlay("DeleteConfirm")
+	var box := panel.get_child(0).get_child(0)
+	var label := UiWidgets.label("", "DeleteText")
+	label.custom_minimum_size = Vector2(420, 0)
+	box.add_child(label)
+	box.custom_minimum_size = Vector2(420, 0)
+	var row := HBoxContainer.new()
+	box.add_child(row)
+	var yes := UiWidgets.button("Удалить вместе со ссылками", "ConfirmDelete")
+	yes.pressed.connect(func() -> void:
+		panel.visible = false
+		_doc.remove_item(_remove_kind, _remove_id)
+		_build()
+		_schedule()
+	)
+	row.add_child(yes)
+	var no := UiWidgets.button(UiStrings.CANCEL, "CancelDelete")
+	no.pressed.connect(func() -> void: panel.visible = false)
+	row.add_child(no)
+	return panel
+
+
 func _warn_popup() -> Control:
 	var panel := _overlay("PublishWarn")
 	var box := panel.get_child(0).get_child(0)
@@ -727,7 +792,11 @@ func _publish(force: bool = false) -> void:
 		return
 	_apply_open_fields()
 	var raw := _doc.export_raw()
-	if not CaseValidator.validate(raw).is_empty() or not CaseValidator.publish_errors(raw).is_empty():
+	var blocked := false
+	for issue in EditorChecks.collect(_doc.raw):
+		if str(issue.get("level", "")) == "error":
+			blocked = true
+	if blocked or not CaseValidator.validate(raw).is_empty() or not CaseValidator.publish_errors(raw).is_empty():
 		_show_errors()
 		return
 	var result := CaseLibrary.publish(case_id, raw, force)
@@ -772,13 +841,21 @@ func _apply_open_fields() -> void:
 
 
 func _show_errors() -> void:
-	var label := find_child("EditorErrors", true, false) as Label
-	if label == null or _doc == null:
+	var box := find_child("EditorIssues", true, false) as VBoxContainer
+	if box == null or _doc == null:
 		return
-	var lines: PackedStringArray = PackedStringArray()
-	for item in CaseValidator.validate(_doc.export_raw()):
-		lines.append(str(item.get("message", "")))
-	label.text = "\n".join(lines)
+	for child in box.get_children():
+		child.free()
+	for issue in EditorChecks.collect(_doc.raw):
+		var row := HBoxContainer.new()
+		var label := UiWidgets.label(str(issue.get("text", "")))
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(label)
+		var jump := UiWidgets.button("Перейти", "GotoIssue")
+		var payload: Dictionary = issue
+		jump.pressed.connect(func() -> void: goto_issue(payload))
+		row.add_child(jump)
+		box.add_child(row)
 
 
 func _lock_if_needed() -> void:
@@ -790,10 +867,15 @@ func _lock_if_needed() -> void:
 		(child as TextEdit).editable = false
 	for child in find_children("*", "OptionButton", true, false):
 		(child as OptionButton).disabled = true
-	for node_name in ["AgentUp", "AgentDown", "AddAgent", "UndoButton", "PublishButton"]:
-		var button := find_child(node_name, true, false) as Button
-		if button != null:
-			button.disabled = true
+	for child in find_children("*", "CheckBox", true, false):
+		(child as CheckBox).disabled = true
+	for button in find_children("*", "Button", true, false):
+		var node_name := str(button.name)
+		if node_name.ends_with("Help") or node_name == "BackButton" or node_name == "CopyButton" or node_name == "CloseHelp" or node_name == "GotoIssue":
+			continue
+		if node_name == "CancelPublish" or node_name == "CancelDelete" or node_name == "ConfirmNo":
+			continue
+		(button as Button).disabled = true
 
 
 func _keep_visible(control: Control) -> void:
