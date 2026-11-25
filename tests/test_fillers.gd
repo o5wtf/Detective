@@ -227,23 +227,31 @@ func test_filler_waits_until_dialogue_sent_plus_the_delay() -> void:
 	assert_true(Speaker._filler_waiting)
 	assert_eq(Speaker.filler_line, "")
 	Speaker.stop_and_clear()
+	_voice("gemini", "gemini-3.8-flash-lite-tts", true, true)
+	assert_true(FillerBank.allowed())
 	assert_eq(Speaker.queue.current_id, "")
 	assert_true(Speaker.queue.pending.is_empty())
+	assert_false(Speaker.speaking)
 	FillerBank.delay_ms = 180
 	FillerBank.last_line = ""
-	var started := Time.get_ticks_msec()
+	FillerBank.clock_ms = 10000
 	Speaker.arm_filler("mira_belova")
-	await (Engine.get_main_loop() as SceneTree).create_timer(0.08).timeout
+	await (Engine.get_main_loop() as SceneTree).process_frame
 	assert_eq(Speaker.filler_line, "")
 	assert_true(Speaker._filler_waiting)
-	await (Engine.get_main_loop() as SceneTree).create_timer(0.16).timeout
+	FillerBank.clock_ms = 10179
+	await (Engine.get_main_loop() as SceneTree).process_frame
+	assert_eq(Speaker.filler_line, "")
+	assert_true(Speaker._filler_waiting)
+	FillerBank.clock_ms = 10180
+	await (Engine.get_main_loop() as SceneTree).process_frame
 	assert_eq(Speaker.filler_line, "Хм…")
-	assert_true(Time.get_ticks_msec() - started >= 180)
 	Speaker.stop_filler()
 	LLM.client = old_client
 	mock.free()
 	screen.free()
 	FillerBank.delay_ms = -1
+	FillerBank.clock_ms = -1
 	FillerBank.last_line = ""
 	_restore_config(previous)
 

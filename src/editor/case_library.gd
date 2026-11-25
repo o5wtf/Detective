@@ -255,23 +255,40 @@ static func _write_documents(case_id: String, bytes: PackedByteArray) -> String:
 
 
 static func _write_documents_android(case_id: String, bytes: PackedByteArray) -> String:
+	# gradle_build/use_gradle_build не убирает синглтон: шаблон Gradle всё равно
+	# грузит библиотеку Godot, а AndroidRuntime регистрируется в ней.
 	if not Engine.has_singleton("AndroidRuntime") or not ClassDB.class_exists("JavaClassWrapper"):
 		return "нет MediaStore"
 	var runtime: Object = Engine.get_singleton("AndroidRuntime")
 	var activity: Variant = runtime.call("getActivity")
+	var failed := _java_error()
+	if failed != "":
+		return failed
 	if activity == null:
 		return "нет MediaStore"
 	var values_class: Object = JavaClassWrapper.wrap("android.content.ContentValues")
 	var columns: Object = JavaClassWrapper.wrap("android.provider.MediaStore$MediaColumns")
 	var files: Object = JavaClassWrapper.wrap("android.provider.MediaStore$Files")
 	var environment: Object = JavaClassWrapper.wrap("android.os.Environment")
+	failed = _java_error()
+	if failed != "":
+		return failed
 	if values_class == null or columns == null or files == null or environment == null:
 		return "нет MediaStore"
 	var relative := "%s/Detective/" % str(environment.get("DIRECTORY_DOCUMENTS"))
+	failed = _java_error()
+	if failed != "":
+		return failed
 	var resolver: Variant = activity.call("getContentResolver")
+	failed = _java_error()
+	if failed != "":
+		return failed
 	if resolver == null:
 		return "нет MediaStore"
 	var collection: Variant = files.call("getContentUri", "external")
+	failed = _java_error()
+	if failed != "":
+		return failed
 	var display := "%s.json" % SaveState._safe(case_id)
 	var uri: Variant = _media_insert(resolver, collection, values_class, columns, display, relative)
 	if uri == null:
@@ -280,22 +297,55 @@ static func _write_documents_android(case_id: String, bytes: PackedByteArray) ->
 	if uri == null:
 		return "нет доступа"
 	var stream: Variant = resolver.call("openOutputStream", uri)
-	if stream == null:
-		return "нет доступа"
+	failed = _java_error()
+	if stream == null or failed != "":
+		if stream != null:
+			stream.call("close")
+			var early_close := _java_error()
+			if failed == "":
+				failed = early_close
+		return failed if failed != "" else "нет доступа"
 	stream.call("write", bytes)
-	stream.call("flush")
+	var write_error := _java_error()
+	if write_error == "":
+		stream.call("flush")
+		write_error = _java_error()
 	stream.call("close")
+	var close_error := _java_error()
+	if write_error != "":
+		return write_error
+	if close_error != "":
+		return close_error
 	return ""
 
 
 static func _media_insert(resolver: Variant, collection: Variant, values_class: Object, columns: Object, display: String, relative: String) -> Variant:
-	var values: Object = values_class.call("new")
-	if values == null:
+	var values: Variant = values_class.call("ContentValues")
+	var failed := _java_error()
+	if values == null or failed != "":
 		return null
 	values.call("put", str(columns.get("DISPLAY_NAME")), display)
+	if _java_error() != "":
+		return null
 	values.call("put", str(columns.get("MIME_TYPE")), "application/json")
+	if _java_error() != "":
+		return null
 	values.call("put", str(columns.get("RELATIVE_PATH")), relative)
-	return resolver.call("insert", collection, values)
+	if _java_error() != "":
+		return null
+	var uri: Variant = resolver.call("insert", collection, values)
+	if _java_error() != "":
+		return null
+	return uri
+
+
+static func _java_error() -> String:
+	if not ClassDB.class_exists("JavaClassWrapper"):
+		return ""
+	var exc: Variant = JavaClassWrapper.get_exception()
+	if exc == null:
+		return ""
+	return str(exc)
 
 
 static func _stamp() -> String:

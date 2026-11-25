@@ -103,8 +103,11 @@ func _build_confirm() -> void:
 	_confirm.add_child(center)
 	var box := VBoxContainer.new()
 	box.name = "ConfirmBox"
+	box.custom_minimum_size = Vector2(420, 0)
 	center.add_child(box)
-	box.add_child(UiWidgets.label(UiStrings.SAVE_RESET, "ConfirmText"))
+	var label := UiWidgets.label(UiStrings.SAVE_RESET, "ConfirmText")
+	label.custom_minimum_size = Vector2(420, 0)
+	box.add_child(label)
 	var row := HBoxContainer.new()
 	box.add_child(row)
 	var yes := UiWidgets.button(UiStrings.RESTORE_EXAMPLE, "ConfirmYes")

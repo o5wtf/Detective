@@ -514,21 +514,27 @@ func _help_button(parent: Node, node_name: String, text: String) -> void:
 	button.custom_minimum_size = Vector2(48, 48)
 	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	button.pressed.connect(func() -> void: _show_help(text))
-	var host: Node = parent
-	if parent.get_child_count() > 0:
-		var last := parent.get_child(parent.get_child_count() - 1)
-		if last is VBoxContainer and last.get_child_count() > 0 and last.get_child(0) is Label:
-			host = last
 	var row := HBoxContainer.new()
-	if host.get_child_count() > 0 and host.get_child(0) is Label:
-		var label := host.get_child(0)
-		host.remove_child(label)
+	if parent.get_child_count() > 0 and parent.get_child(parent.get_child_count() - 1) is Label:
+		var label := parent.get_child(parent.get_child_count() - 1)
+		parent.remove_child(label)
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(label)
+		row.add_child(button)
+		parent.add_child(row)
+		return
+	var last := parent.get_child(parent.get_child_count() - 1) if parent.get_child_count() > 0 else null
+	if last is VBoxContainer and last.get_child_count() > 0 and last.get_child(0) is Label:
+		var title := last.get_child(0)
+		last.remove_child(title)
+		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(title)
+		row.add_child(button)
+		last.add_child(row)
+		last.move_child(row, 0)
+		return
 	row.add_child(button)
-	host.add_child(row)
-	if host != parent:
-		host.move_child(row, 0)
+	parent.add_child(row)
 
 
 func _show_help(text: String) -> void:
@@ -583,13 +589,21 @@ func _fail_popup() -> Control:
 func _warn_popup() -> Control:
 	var panel := _overlay("PublishWarn")
 	var box := panel.get_child(0).get_child(0)
-	box.add_child(UiWidgets.label(UiStrings.SAVE_RESET, "HelpText"))
+	var label := UiWidgets.label(UiStrings.SAVE_RESET, "HelpText")
+	label.custom_minimum_size = Vector2(420, 0)
+	box.add_child(label)
+	box.custom_minimum_size = Vector2(420, 0)
+	var row := HBoxContainer.new()
+	box.add_child(row)
 	var yes := UiWidgets.button(UiStrings.PUBLISH, "ConfirmPublish")
 	yes.pressed.connect(func() -> void:
 		panel.visible = false
 		_publish(true)
 	)
-	box.add_child(yes)
+	row.add_child(yes)
+	var no := UiWidgets.button(UiStrings.CANCEL, "CancelPublish")
+	no.pressed.connect(func() -> void: panel.visible = false)
+	row.add_child(no)
 	return panel
 
 

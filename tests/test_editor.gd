@@ -71,6 +71,11 @@ func test_example_is_view_only_until_copy_and_has_no_delete() -> void:
 	assert_eq(method.placeholder_text, "Кухонный нож из клуба")
 	var help_row := (editor.find_child("ProfanityHelp", true, false) as Button).get_parent()
 	assert_true(help_row is HBoxContainer)
+	assert_true((editor.find_child("FillerHelp", true, false) as Button).get_parent() is HBoxContainer)
+	assert_true((editor.find_child("RelationsHelp", true, false) as Button).get_parent() is HBoxContainer)
+	assert_true(editor.find_child("CancelPublish", true, false) != null)
+	var confirm := home.find_child("ConfirmBox", true, false) as Control
+	assert_true(confirm.custom_minimum_size.x >= 420.0)
 	editor.free()
 	home.free()
 	_restore_roots()
