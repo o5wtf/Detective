@@ -21,7 +21,7 @@ func test_question_records_lie_then_truth_unlocks_evidence() -> void:
 	await Game.ask("b", "Что вы видели?")
 	assert_true(_heard("b", "fb", "basic"))
 	assert_true(Game.state.contradictions.has("c1"))
-	assert_false(Game.state.unlocked_evidence.has("ev"))
+	assert_true(Game.state.unlocked_evidence.has("ev"))
 	var restored := GameState.from_dict(Game.state.to_dict())
 	assert_eq(restored.heard.size(), Game.state.heard.size())
 	assert_true(restored.contradictions.has("c1"))

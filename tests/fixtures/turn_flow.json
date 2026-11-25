@@ -27,7 +27,11 @@
           "pressure_for_basic": 0,
           "pressure_for_full": 80,
           "requires_evidence": false,
-          "breaks_lie_on": "evidence"
+          "breaks_lie_on": "evidence",
+          "breaks_with": [
+            [{"type": "evidence_shown", "evidence_id": "ev"}],
+            [{"type": "testimony_retold", "fact_id": "fb"}]
+          ]
         }
       ]
     },

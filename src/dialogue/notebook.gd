@@ -17,12 +17,35 @@ func entries() -> Array[Dictionary]:
 		var fact_id := str(heard.get("fact_id", ""))
 		var form := str(heard.get("form", ""))
 		var fact: CaseData.Fact = case_data.fact_by_id.get(fact_id) as CaseData.Fact
+		var broken := fact != null and fact.is_lie and state.broken_lies.has(fact_id) and form == "lie"
 		rows.append({
 			"agent_id": str(heard.get("agent_id", "")),
 			"turn": int(heard.get("turn", 0)),
 			"fact_id": fact_id,
 			"form": form,
+			"statement_id": "%s|%s" % [fact_id, form],
 			"text": text_for(fact, form),
+			"broken": broken,
+		})
+	return rows
+
+
+func confrontations(agent_id: String = "") -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	if state == null:
+		return rows
+	for item in state.confrontations:
+		if agent_id != "" and str(item.get("agent_id", "")) != agent_id:
+			continue
+		var verdict := str(item.get("verdict", ""))
+		rows.append({
+			"turn": int(item.get("turn", 0)),
+			"agent_id": str(item.get("agent_id", "")),
+			"statement_id": str(item.get("statement_id", "")),
+			"evidence_id": str(item.get("evidence_id", "")),
+			"verdict": verdict,
+			"player_verdict": UiStrings.player_verdict(verdict),
+			"also_broken": item.get("also_broken", []),
 		})
 	return rows
 

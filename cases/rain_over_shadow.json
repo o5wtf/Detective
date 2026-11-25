@@ -92,7 +92,22 @@
           "lie_text": "Не знала ни о чём.",
           "related_evidence_ids": [],
           "requires_evidence": false,
-          "breaks_lie_on": "contradiction",
+          "breaks_lie_on": [
+            "contradiction",
+            "evidence"
+          ],
+          "breaks_with": [
+            [
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_alina_irina_call"
+              },
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_divorce_papers"
+              }
+            ]
+          ],
           "tags": [
             "alina"
           ]
@@ -126,6 +141,14 @@
           ],
           "requires_evidence": false,
           "breaks_lie_on": "evidence",
+          "breaks_with": [
+            [
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_divorce_papers"
+              }
+            ]
+          ],
           "tags": [
             "secret"
           ]
@@ -220,6 +243,25 @@
             "contradiction",
             "evidence"
           ],
+          "breaks_with": [
+            [
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_financial_docs"
+              }
+            ],
+            [
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_irina_money",
+                "form": "truth_full"
+              },
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_alina_viktor_threat"
+              }
+            ]
+          ],
           "tags": [
             "money"
           ]
@@ -238,6 +280,24 @@
           "breaks_lie_on": [
             "contradiction",
             "evidence"
+          ],
+          "breaks_with": [
+            [
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_kitchen_knife"
+              }
+            ],
+            [
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_pavel_arkady_kitchen"
+              },
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_mira_knife"
+              }
+            ]
           ],
           "tags": [
             "knife"
@@ -258,6 +318,24 @@
             "contradiction",
             "evidence"
           ],
+          "breaks_with": [
+            [
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_security_log"
+              }
+            ],
+            [
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_pavel_closing"
+              },
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_mira_leaving"
+              }
+            ]
+          ],
           "tags": [
             "time"
           ]
@@ -271,7 +349,33 @@
           "lie_text": "Виктор ничего такого не говорил, всё было спокойно.",
           "related_evidence_ids": [],
           "requires_evidence": false,
-          "breaks_lie_on": "contradiction",
+          "breaks_lie_on": [
+            "contradiction",
+            "evidence"
+          ],
+          "breaks_with": [
+            [
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_alina_viktor_threat"
+              },
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_irina_money",
+                "form": "truth_full"
+              }
+            ],
+            [
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_alina_viktor_threat"
+              },
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_financial_docs"
+              }
+            ]
+          ],
           "tags": [
             "motive",
             "mira"
@@ -287,6 +391,31 @@
           "related_evidence_ids": [],
           "requires_evidence": false,
           "breaks_lie_on": "contradiction",
+          "breaks_with": [
+            [
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_alina_saw",
+                "form": "truth_full"
+              },
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_mira_arkady"
+              }
+            ],
+            [
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_alina_saw",
+                "form": "truth_full"
+              },
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_mira_leaving",
+                "form": "truth_full"
+              }
+            ]
+          ],
           "tags": [
             "mira"
           ]
@@ -303,6 +432,14 @@
           ],
           "requires_evidence": true,
           "breaks_lie_on": "evidence",
+          "breaks_with": [
+            [
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_kitchen_knife"
+              }
+            ]
+          ],
           "tags": [
             "motive"
           ],
@@ -354,6 +491,19 @@
           "related_evidence_ids": [],
           "requires_evidence": false,
           "breaks_lie_on": "contradiction",
+          "breaks_with": [
+            [
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_alina_saw",
+                "form": "truth_full"
+              },
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_arkady_mira_blame"
+              }
+            ]
+          ],
           "tags": [
             "arkady",
             "secret"
@@ -369,6 +519,7 @@
           "related_evidence_ids": [],
           "requires_evidence": false,
           "breaks_lie_on": null,
+          "breaks_with": [],
           "tags": [
             "viktor"
           ]
@@ -388,6 +539,24 @@
             "contradiction",
             "evidence"
           ],
+          "breaks_with": [
+            [
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_kitchen_knife"
+              }
+            ],
+            [
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_pavel_mira_knife"
+              },
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_crime_scene"
+              }
+            ]
+          ],
           "tags": [
             "knife",
             "pavel"
@@ -405,6 +574,14 @@
           ],
           "requires_evidence": false,
           "breaks_lie_on": "evidence",
+          "breaks_with": [
+            [
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_mira_notes"
+              }
+            ]
+          ],
           "tags": [
             "secret"
           ]
@@ -437,6 +614,24 @@
           "breaks_lie_on": [
             "contradiction",
             "evidence"
+          ],
+          "breaks_with": [
+            [
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_mira_notes"
+              }
+            ],
+            [
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_roman_bribe"
+              },
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_security_log"
+              }
+            ]
           ],
           "tags": [
             "time",
@@ -531,7 +726,24 @@
             "ev_kitchen_knife"
           ],
           "requires_evidence": false,
-          "breaks_lie_on": "evidence",
+          "breaks_lie_on": [
+            "contradiction",
+            "evidence"
+          ],
+          "breaks_with": [
+            [
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_kitchen_knife"
+              }
+            ],
+            [
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_mira_knife"
+              }
+            ]
+          ],
           "tags": [
             "mira",
             "knife"
@@ -549,6 +761,14 @@
           ],
           "requires_evidence": false,
           "breaks_lie_on": "evidence",
+          "breaks_with": [
+            [
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_kitchen_knife"
+              }
+            ]
+          ],
           "tags": [
             "arkady",
             "knife",
@@ -579,6 +799,7 @@
           "related_evidence_ids": [],
           "requires_evidence": false,
           "breaks_lie_on": null,
+          "breaks_with": [],
           "tags": [
             "secret"
           ]
@@ -640,6 +861,7 @@
           "related_evidence_ids": [],
           "requires_evidence": false,
           "breaks_lie_on": null,
+          "breaks_with": [],
           "tags": [
             "viktor"
           ]
@@ -714,6 +936,14 @@
           ],
           "requires_evidence": true,
           "breaks_lie_on": "evidence",
+          "breaks_with": [
+            [
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_alina_messages"
+              }
+            ]
+          ],
           "tags": [
             "threat"
           ]
@@ -822,6 +1052,7 @@
           "related_evidence_ids": [],
           "requires_evidence": false,
           "breaks_lie_on": null,
+          "breaks_with": [],
           "tags": [
             "mira"
           ]
@@ -837,7 +1068,24 @@
             "ev_security_log"
           ],
           "requires_evidence": false,
-          "breaks_lie_on": "evidence",
+          "breaks_lie_on": [
+            "contradiction",
+            "evidence"
+          ],
+          "breaks_with": [
+            [
+              {
+                "type": "evidence_shown",
+                "evidence_id": "ev_security_log"
+              }
+            ],
+            [
+              {
+                "type": "testimony_retold",
+                "fact_id": "fact_mira_return"
+              }
+            ]
+          ],
           "tags": [
             "secret",
             "mira"

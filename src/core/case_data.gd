@@ -46,7 +46,12 @@ class Fact:
 	## Ложь открывается только после того, как сломаны эти факты.
 	var requires_broken_lies: Array[String] = []
 	## null, строка или список: pressure | evidence | contradiction.
+	## Если breaks_with задан в файле, движок это поле не читает.
 	var breaks_lie_on: Variant = null
+	## Наборы слома. Пусто и breaks_with_explicit — ложь без наборов.
+	var breaks_with: Array = []
+	## false: поля в файле не было, наборы переводятся из breaks_lie_on.
+	var breaks_with_explicit: bool = false
 
 
 class Agent:

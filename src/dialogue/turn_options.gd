@@ -55,30 +55,49 @@ static func build(case_data: CaseData, state: GameState, agent_id: String) -> Ar
 			"text": "игрок называет содержание улики «%s»: %s" % [evidence.title, substance],
 		})
 		number += 1
-	for entry in state.heard:
-		if str(entry.get("agent_id", "")) == agent_id:
-			continue
-		var fact_id := str(entry.get("fact_id", ""))
-		var form := str(entry.get("form", ""))
-		for contradiction in case_data.contradictions:
-			var lie_id := _paired_lie(case_data, state, agent_id, fact_id, form, contradiction)
-			if lie_id == "":
+	var agent: CaseData.Agent = case_data.agent_by_id.get(agent_id) as CaseData.Agent
+	var seen_cite := {}
+	if agent != null:
+		for fact in agent.facts:
+			if not fact.is_lie or state.broken_lies.has(fact.id):
 				continue
-			var speaker := _speaker(case_data, str(entry.get("agent_id", "")))
-			var quote := Notebook.text_for(case_data.fact_by_id.get(fact_id) as CaseData.Fact, form)
-			options.append({
-				"n": number,
-				"kind": "cite",
-				"evidence_id": "",
-				"fact_id": fact_id,
-				"lie_id": lie_id,
-				"contradiction_id": contradiction.id,
-				"title": "",
-				"topic": "",
-				"text": "игрок прямо говорит, что %s сказал: «%s»" % [speaker, quote],
-				"admit": _truth(case_data, state, lie_id),
-			})
-			number += 1
+			for items in BreakSets.sets_of(case_data, fact):
+				if items is not Array:
+					continue
+				for item in items:
+					if item is not Dictionary:
+						continue
+					var body := item as Dictionary
+					if str(body.get("type", "")) != "testimony_retold":
+						continue
+					var fact_id := str(body.get("fact_id", ""))
+					var forms := PackedStringArray()
+					if str(body.get("form", "")) == "truth_full":
+						forms.append("full")
+					else:
+						forms.append("basic")
+						forms.append("full")
+					for form in forms:
+						var pair := "%s|%s" % [fact_id, form]
+						if seen_cite.has(pair) or state.retold.has(BreakSets.retell_key(agent_id, fact_id, form)):
+							continue
+						if not _heard(state, fact_id, form):
+							continue
+						seen_cite[pair] = true
+						var speaker := _speaker(case_data, str(case_data.fact_owner.get(fact_id, "")))
+						var quote := Notebook.text_for(case_data.fact_by_id.get(fact_id) as CaseData.Fact, form)
+						options.append({
+							"n": number,
+							"kind": "cite",
+							"evidence_id": "",
+							"fact_id": fact_id,
+							"lie_id": "",
+							"form": form,
+							"title": "",
+							"topic": "",
+							"text": "игрок прямо говорит, что %s сказал: «%s»" % [speaker, quote],
+						})
+						number += 1
 	if options.is_empty():
 		return options
 	options.append({
@@ -128,6 +147,7 @@ static func plan(case_data: CaseData, state: GameState, agent_id: String, option
 		"touch": [] as Array[String],
 		"break_lies": [] as Array[String],
 		"present": [] as Array[String],
+		"retold": [] as Array[String],
 		"admit": [] as Array,
 		"restart": false,
 		"picked": picked,
@@ -157,14 +177,15 @@ static func plan(case_data: CaseData, state: GameState, agent_id: String, option
 			result["restart"] = true
 			result["decision"] = "present"
 		elif kind == "cite" and _cite_ok(case_data, state, agent_id, option):
-			var lie_id := str(option.get("lie_id", ""))
-			var admit := str(option.get("admit", ""))
-			if not (result["break_lies"] as Array).has(lie_id):
-				(result["break_lies"] as Array).append(lie_id)
-				if admit != "":
-					(result["admit"] as Array).append(admit)
-			result["restart"] = true
+			var fact_id := str(option.get("fact_id", ""))
+			var form := str(option.get("form", ""))
+			var key := BreakSets.retell_key(agent_id, fact_id, form)
+			if not (result["retold"] as Array).has(key):
+				(result["retold"] as Array).append(key)
+			_retell_grants(case_data, state, agent_id, key, result)
 			result["decision"] = "cite"
+			if not (result["break_lies"] as Array).is_empty():
+				result["restart"] = true
 	if not saw:
 		result["decision"] = "none"
 	return result
@@ -181,28 +202,48 @@ static func touch_count(state: GameState, agent_id: String, evidence_id: String)
 
 
 static func _present_grants(case_data: CaseData, state: GameState, agent_id: String, evidence_id: String, result: Dictionary) -> void:
-	for fact_id in case_data.fact_owner:
-		if str(case_data.fact_owner[fact_id]) != agent_id:
-			continue
-		var fact: CaseData.Fact = case_data.fact_by_id.get(fact_id) as CaseData.Fact
-		if fact == null or not fact.is_lie or state.broken_lies.has(fact.id):
-			continue
-		if not fact.related_evidence_ids.has(evidence_id) or not _breaks_on_evidence(fact):
-			continue
-		if not _requirements_open(state, fact):
-			continue
-		if not (result["break_lies"] as Array).has(fact.id):
-			(result["break_lies"] as Array).append(fact.id)
-			(result["admit"] as Array).append(_truth(case_data, state, fact.id, evidence_id))
+	var preview := GameState.from_dict(state.to_dict())
+	_mark(preview, evidence_id, agent_id)
+	_grants(case_data, preview, agent_id, result, evidence_id)
 
 
-static func _breaks_on_evidence(fact: CaseData.Fact) -> bool:
-	var value: Variant = fact.breaks_lie_on
-	if value is String:
-		return value == "evidence"
-	if value is Array:
-		return value.has("evidence")
-	return false
+static func _retell_grants(case_data: CaseData, state: GameState, agent_id: String, key: String, result: Dictionary) -> void:
+	var preview := GameState.from_dict(state.to_dict())
+	for previous in result.get("retold", []):
+		var name := str(previous)
+		if name != "" and not preview.retold.has(name):
+			preview.retold.append(name)
+	if not preview.retold.has(key):
+		preview.retold.append(key)
+	for evidence_id in result.get("present", []):
+		_mark(preview, str(evidence_id), agent_id)
+	_grants(case_data, preview, agent_id, result, "")
+
+
+static func _grants(case_data: CaseData, preview: GameState, agent_id: String, result: Dictionary, shown_evidence_id: String) -> void:
+	var agent: CaseData.Agent = case_data.agent_by_id.get(agent_id) as CaseData.Agent
+	if agent == null:
+		return
+	for fact in agent.facts:
+		if not fact.is_lie or preview.broken_lies.has(fact.id) or not _requirements_open(preview, fact):
+			continue
+		if not BreakSets.holds(case_data, preview, fact):
+			continue
+		if (result["break_lies"] as Array).has(fact.id):
+			continue
+		(result["break_lies"] as Array).append(fact.id)
+		(result["admit"] as Array).append(_truth(case_data, preview, fact.id, shown_evidence_id))
+
+
+static func _mark(preview: GameState, evidence_id: String, agent_id: String) -> void:
+	if evidence_id == "":
+		return
+	if not preview.shown.has(evidence_id):
+		preview.shown[evidence_id] = [] as Array[String]
+	var agents: Array = preview.shown[evidence_id]
+	if not agents.has(agent_id):
+		agents.append(agent_id)
+		preview.shown[evidence_id] = agents
 
 
 static func _requirements_open(state: GameState, fact: CaseData.Fact) -> bool:
@@ -221,17 +262,17 @@ static func _option(options: Array, number: int) -> Dictionary:
 
 static func _cite_ok(case_data: CaseData, state: GameState, agent_id: String, option: Dictionary) -> bool:
 	var fact_id := str(option.get("fact_id", ""))
-	var lie_id := str(option.get("lie_id", ""))
-	if fact_id == "" or lie_id == "" or state.broken_lies.has(lie_id):
+	var form := str(option.get("form", ""))
+	if fact_id == "" or form == "" or case_data.fact_by_id.get(fact_id) == null:
 		return false
-	if str(case_data.fact_owner.get(lie_id, "")) != agent_id:
+	if state.retold.has(BreakSets.retell_key(agent_id, fact_id, form)):
 		return false
-	var fact: CaseData.Fact = case_data.fact_by_id.get(lie_id) as CaseData.Fact
-	if fact == null or not fact.is_lie or not _requirements_open(state, fact):
-		return false
-	for contradiction in case_data.contradictions:
-		var matched := _paired_lie(case_data, state, agent_id, fact_id, _heard_form(state, agent_id, fact_id), contradiction)
-		if matched == lie_id:
+	return _heard(state, fact_id, form)
+
+
+static func _heard(state: GameState, fact_id: String, form: String) -> bool:
+	for entry in state.heard:
+		if str(entry.get("fact_id", "")) == fact_id and str(entry.get("form", "")) == form:
 			return true
 	return false
 

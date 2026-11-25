@@ -217,11 +217,18 @@ static func _packet_line(entry: Dictionary) -> String:
 	var mode := str(entry.get("mode", ""))
 	var content := str(entry.get("content", ""))
 	var lie_text := str(entry.get("lie_text", ""))
+	var doubt := str(entry.get("doubt", "")).strip_edges()
 	if mode == "full" or mode == "basic":
 		return "%s [ПРАВДА]: %s" % [key, content]
 	if mode == "lie_or_basic":
-		return "%s [ЛОЖЬ, МОЖНО ОГОВОРИТЬСЯ]: твоя версия: «%s». Проговориться можно только так: «%s»" % [key, lie_text, content]
-	return "%s [ЛОЖЬ]: %s" % [key, lie_text if lie_text != "" else content]
+		var slip := "%s [ЛОЖЬ, МОЖНО ОГОВОРИТЬСЯ%s]: твоя версия: «%s». Проговориться можно только так: «%s»" % [key, ", ПОД СОМНЕНИЕМ" if doubt != "" else "", lie_text, content]
+		if doubt == "":
+			return slip
+		return "%s %s %s" % [slip, doubt, BreakSets.DEFENSE]
+	var lie := "%s [ЛОЖЬ%s]: %s" % [key, ", ПОД СОМНЕНИЕМ" if doubt != "" else "", lie_text if lie_text != "" else content]
+	if doubt == "":
+		return lie
+	return "%s. %s %s" % [lie, doubt, BreakSets.DEFENSE]
 
 
 static func _shown_block(case_data: CaseData, state: GameState, agent_id: String) -> String:
@@ -303,21 +310,21 @@ static func _notebook_line(case_data: CaseData, entry: Dictionary) -> String:
 
 
 static func _notebook_protected(case_data: CaseData, state: GameState, agent_id: String, fact_id: String) -> bool:
-	for contradiction in case_data.contradictions:
-		var other := ""
-		if contradiction.fact_a_id == fact_id:
-			other = contradiction.fact_b_id
-		elif contradiction.fact_b_id == fact_id:
-			other = contradiction.fact_a_id
-		else:
+	var agent: CaseData.Agent = case_data.agent_by_id.get(agent_id) as CaseData.Agent
+	if agent == null:
+		return false
+	for fact in agent.facts:
+		if not fact.is_lie or state.broken_lies.has(fact.id):
 			continue
-		if str(case_data.fact_owner.get(other, "")) != agent_id:
-			continue
-		if state.broken_lies.has(other):
-			continue
-		var lie: CaseData.Fact = case_data.fact_by_id.get(other) as CaseData.Fact
-		if lie != null and lie.is_lie:
-			return true
+		for items in BreakSets.sets_of(case_data, fact):
+			if items is not Array:
+				continue
+			for item in items:
+				if item is not Dictionary:
+					continue
+				var body := item as Dictionary
+				if str(body.get("type", "")) == "testimony_retold" and str(body.get("fact_id", "")) == fact_id:
+					return true
 	return false
 
 

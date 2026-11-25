@@ -86,6 +86,7 @@ func _ready() -> void:
 	_chat.notebook_requested.connect(func() -> void: _show_tab(_notebook))
 	_chat.suspects_requested.connect(func() -> void: _show_tab(_suspects))
 	_evidence.present_requested.connect(_present_from_board)
+	_notebook.confront_chosen.connect(_confront_from_notebook)
 	Game.events.connect(_on_events)
 	_select_initial_agent()
 	call_deferred("_apply_layout")
@@ -172,6 +173,13 @@ func _show_tab(node: Control) -> void:
 	_side.current_tab = node.get_index()
 	if portrait:
 		_drawer.visible = true
+
+
+func _confront_from_notebook(agent_id: String, statement_id: String, evidence_id: String) -> void:
+	_on_agent(agent_id)
+	if _mode != "wide":
+		_drawer.visible = false
+	_chat.begin_confront(statement_id, evidence_id)
 
 
 func _present_from_board(evidence_id: String) -> void:

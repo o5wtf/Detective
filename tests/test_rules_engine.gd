@@ -225,7 +225,7 @@ func test_unlock_conditions() -> void:
 	assert_false(contradiction_engine.state.unlocked_evidence.has("named"))
 	contradiction_engine.register_statements("b", [{"fact_id": "fb", "form": "basic"}])
 	assert_true(contradiction_engine.state.contradictions.has("c1"))
-	assert_false(contradiction_engine.state.unlocked_evidence.has("named"))
+	assert_true(contradiction_engine.state.unlocked_evidence.has("named"))
 	assert_false(contradiction_engine.state.unlocked_evidence.has("any_c"))
 
 
@@ -239,6 +239,9 @@ func test_commit_plan_does_not_break_a_lie_before_its_requirements() -> void:
 	engine.state.broken_lies.append("fact_arkady_meeting")
 	engine.state.broken_lies.append("fact_arkady_knife")
 	engine.commit_plan("arkady_volkov", {"break_lies": ["fact_arkady_panic"], "present": [], "unlock": [], "touch": []})
+	assert_false(engine.state.broken_lies.has("fact_arkady_panic"))
+	engine.state.unlocked_evidence.append("ev_kitchen_knife")
+	engine.present_evidence("arkady_volkov", "ev_kitchen_knife")
 	assert_true(engine.state.broken_lies.has("fact_arkady_panic"))
 
 
