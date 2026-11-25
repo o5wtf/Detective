@@ -152,6 +152,7 @@ func _on_play(case_id: String, mode: String) -> void:
 
 
 func _on_continue() -> void:
+	Speaker.reset_for_case()
 	var result := Game.continue_case(CaseLibrary.published_path(CaseLibrary.example_id()))
 	if result.get("ok", false):
 		show_investigation()

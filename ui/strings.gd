@@ -3,6 +3,7 @@ extends RefCounted
 ## Все подписи интерфейса. Тексты дела сюда не входят.
 
 const NEW_CASE := "Новое дело"
+const BEGIN := "Начать"
 const CONTINUE := "Продолжить"
 const RESTART := "Начать заново"
 const SETTINGS := "Настройки"

@@ -32,8 +32,9 @@ func _ready() -> void:
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(UiWidgets.scrolling(box))
 	var restore := UiWidgets.button(UiStrings.RESTORE_EXAMPLE, "RestoreExampleButton")
-	restore.pressed.connect(_restore)
+	restore.pressed.connect(_ask_restore)
 	column.add_child(restore)
+	_build_confirm()
 	refresh()
 
 
@@ -74,7 +75,7 @@ func _card(case_id: String) -> Control:
 	panel.add_child(UiWidgets.label(briefing))
 	var save := SaveState.exists(case_id)
 	panel.add_child(UiWidgets.label("Персонажей: %d%s" % [data.agents.size(), " · есть сохранение" if save else ""]))
-	var start := UiWidgets.button(UiStrings.NEW_CASE, "Start_%s" % case_id)
+	var start := UiWidgets.button(UiStrings.BEGIN, "Start_%s" % case_id)
 	start.pressed.connect(func() -> void: play_pressed.emit(case_id, "start"))
 	panel.add_child(start)
 	if save:
@@ -87,6 +88,38 @@ func _card(case_id: String) -> Control:
 	return panel
 
 
-func _restore() -> void:
+var _confirm: Control
+
+
+func _build_confirm() -> void:
+	_confirm = PanelContainer.new()
+	_confirm.name = "ConfirmDialog"
+	_confirm.visible = false
+	_confirm.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_confirm.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_confirm)
+	var center := CenterContainer.new()
+	UiWidgets.fill(center)
+	_confirm.add_child(center)
+	var box := VBoxContainer.new()
+	box.name = "ConfirmBox"
+	center.add_child(box)
+	box.add_child(UiWidgets.label(UiStrings.SAVE_RESET, "ConfirmText"))
+	var row := HBoxContainer.new()
+	box.add_child(row)
+	var yes := UiWidgets.button(UiStrings.RESTORE_EXAMPLE, "ConfirmYes")
+	yes.pressed.connect(_accept_restore)
+	row.add_child(yes)
+	var no := UiWidgets.button(UiStrings.DISMISS, "ConfirmNo")
+	no.pressed.connect(func() -> void: _confirm.visible = false)
+	row.add_child(no)
+
+
+func _ask_restore() -> void:
+	_confirm.visible = true
+
+
+func _accept_restore() -> void:
+	_confirm.visible = false
 	CaseLibrary.restore_example()
 	refresh()

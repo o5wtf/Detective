@@ -34,8 +34,9 @@ func _ready() -> void:
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(UiWidgets.scrolling(box))
 	var restore := UiWidgets.button(UiStrings.RESTORE_EXAMPLE, "RestoreExampleButton")
-	restore.pressed.connect(_restore)
+	restore.pressed.connect(func() -> void: _ask(CaseLibrary.example_id(), "restore"))
 	column.add_child(restore)
+	_build_confirm()
 	refresh()
 
 
@@ -65,11 +66,11 @@ func _row(case_id: String) -> Control:
 	buttons.add_child(copy)
 	if CaseLibrary.is_example(case_id):
 		var restore := UiWidgets.button(UiStrings.RESTORE_EXAMPLE, "Restore_%s" % case_id)
-		restore.pressed.connect(_restore)
+		restore.pressed.connect(func() -> void: _ask(case_id, "restore"))
 		buttons.add_child(restore)
 	else:
 		var delete := UiWidgets.button(UiStrings.DELETE_CASE, "Delete_%s" % case_id)
-		delete.pressed.connect(func() -> void: _delete(case_id))
+		delete.pressed.connect(func() -> void: _ask(case_id, "delete"))
 		buttons.add_child(delete)
 	return row
 
@@ -100,11 +101,48 @@ func _copy(case_id: String) -> void:
 		open_pressed.emit(fresh)
 
 
-func _delete(case_id: String) -> void:
-	CaseLibrary.delete_case(case_id)
-	refresh()
+var _confirm: Control
+var _confirm_id := ""
+var _confirm_action := ""
 
 
-func _restore() -> void:
-	CaseLibrary.restore_example()
+func _build_confirm() -> void:
+	_confirm = PanelContainer.new()
+	_confirm.name = "ConfirmDialog"
+	_confirm.visible = false
+	_confirm.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_confirm.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_confirm)
+	var center := CenterContainer.new()
+	UiWidgets.fill(center)
+	_confirm.add_child(center)
+	var box := VBoxContainer.new()
+	box.name = "ConfirmBox"
+	center.add_child(box)
+	box.add_child(UiWidgets.label("", "ConfirmText"))
+	var row := HBoxContainer.new()
+	box.add_child(row)
+	var yes := UiWidgets.button(UiStrings.YES, "ConfirmYes")
+	yes.pressed.connect(_accept)
+	row.add_child(yes)
+	var no := UiWidgets.button(UiStrings.DISMISS, "ConfirmNo")
+	no.pressed.connect(func() -> void: _confirm.visible = false)
+	row.add_child(no)
+
+
+func _ask(case_id: String, action: String) -> void:
+	_confirm_id = case_id
+	_confirm_action = action
+	var label := _confirm.find_child("ConfirmText", true, false) as Label
+	if label != null:
+		label.text = UiStrings.SAVE_RESET if action == "restore" else "Удалить это дело? Черновик, опубликованный файл и сохранение будут стёрты."
+	_confirm.visible = true
+
+
+func _accept() -> void:
+	_confirm.visible = false
+	if _confirm_action == "delete":
+		CaseLibrary.delete_case(_confirm_id)
+	elif _confirm_action == "restore":
+		CaseLibrary.restore_example()
 	refresh()

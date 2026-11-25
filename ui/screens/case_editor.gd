@@ -130,6 +130,8 @@ func _overview() -> Control:
 	box.add_child(_area("Как всё было", "TruthEdit", str(_doc.raw.get("truth_timeline", "")), "Клуб закрылся в 01:00. Виктор остался…", "truth_timeline"))
 	_help_button(box, "TruthHelp", "Игрок видит на экране победы. ИИ этот текст не получает")
 	box.add_child(_killer())
+	box.add_child(_choices("method"))
+	box.add_child(_choices("motive"))
 	box.add_child(UiWidgets.label("Нужно назвать убийцу, способ и мотив"))
 	return _scroll
 
@@ -502,10 +504,31 @@ func _schedule() -> void:
 	_timer.start()
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_PAUSED:
+		flush_autosave()
+
+
 func _help_button(parent: Node, node_name: String, text: String) -> void:
 	var button := UiWidgets.button("?", node_name)
+	button.custom_minimum_size = Vector2(48, 48)
+	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	button.pressed.connect(func() -> void: _show_help(text))
-	parent.add_child(button)
+	var host: Node = parent
+	if parent.get_child_count() > 0:
+		var last := parent.get_child(parent.get_child_count() - 1)
+		if last is VBoxContainer and last.get_child_count() > 0 and last.get_child(0) is Label:
+			host = last
+	var row := HBoxContainer.new()
+	if host.get_child_count() > 0 and host.get_child(0) is Label:
+		var label := host.get_child(0)
+		host.remove_child(label)
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(label)
+	row.add_child(button)
+	host.add_child(row)
+	if host != parent:
+		host.move_child(row, 0)
 
 
 func _show_help(text: String) -> void:
@@ -515,50 +538,141 @@ func _show_help(text: String) -> void:
 	_help.visible = true
 
 
-func _popup(node_name: String) -> Control:
+func _overlay(node_name: String) -> Control:
 	var panel := PanelContainer.new()
 	panel.name = node_name
 	panel.visible = false
 	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	var label := UiWidgets.label("", "HelpText")
-	panel.add_child(label)
+	var center := CenterContainer.new()
+	UiWidgets.fill(center)
+	panel.add_child(center)
+	var box := VBoxContainer.new()
+	box.name = "%sBox" % node_name
+	center.add_child(box)
+	return panel
+
+
+func _popup(node_name: String) -> Control:
+	var panel := _overlay(node_name)
+	var box := panel.get_child(0).get_child(0)
+	box.add_child(UiWidgets.label("", "HelpText"))
 	var close := UiWidgets.button(UiStrings.DISMISS, "CloseHelp")
 	close.pressed.connect(func() -> void: panel.visible = false)
-	panel.add_child(close)
+	box.add_child(close)
 	return panel
 
 
 func _fail_popup() -> Control:
-	var panel := _popup("SaveFailed")
-	var label := panel.find_child("HelpText", true, false) as Label
-	if label != null:
-		label.text = UiStrings.SAVE_FAILED
-		label.name = "SaveFailedText"
+	var panel := _overlay("SaveFailed")
+	var box := panel.get_child(0).get_child(0)
+	var label := UiWidgets.label(UiStrings.SAVE_FAILED, "SaveFailedText")
+	box.add_child(label)
 	var retry := UiWidgets.button(UiStrings.RETRY, "RetrySave")
 	retry.pressed.connect(_retry_save)
-	panel.add_child(retry)
+	box.add_child(retry)
 	var leave := UiWidgets.button(UiStrings.EXIT_UNSAVED, "ExitWithoutSaving")
 	leave.pressed.connect(func() -> void:
 		panel.visible = false
 		leave_pressed.emit()
 	)
-	panel.add_child(leave)
+	box.add_child(leave)
 	return panel
 
 
 func _warn_popup() -> Control:
-	var panel := _popup("PublishWarn")
-	var label := panel.find_child("HelpText", true, false) as Label
-	if label != null:
-		label.text = UiStrings.SAVE_RESET
+	var panel := _overlay("PublishWarn")
+	var box := panel.get_child(0).get_child(0)
+	box.add_child(UiWidgets.label(UiStrings.SAVE_RESET, "HelpText"))
 	var yes := UiWidgets.button(UiStrings.PUBLISH, "ConfirmPublish")
 	yes.pressed.connect(func() -> void:
 		panel.visible = false
 		_publish(true)
 	)
-	panel.add_child(yes)
+	box.add_child(yes)
 	return panel
+
+
+func _choices(kind: String) -> Control:
+	var method := kind == "method"
+	var box := VBoxContainer.new()
+	box.name = "MethodOptions" if method else "MotiveOptions"
+	box.add_child(UiWidgets.label("Варианты способа" if method else "Варианты мотива"))
+	var key := "method_options" if method else "motive_options"
+	var true_key := "true_method_id" if method else "true_motive_id"
+	var sample := "Кухонный нож из клуба" if method else "Деньги / долг и унижение"
+	var options: Array = _doc.raw.get(key, [])
+	var marked := str(_doc.raw.get(true_key, ""))
+	for index in options.size():
+		if options[index] is not Dictionary:
+			continue
+		var option: Dictionary = options[index]
+		var row := HBoxContainer.new()
+		box.add_child(row)
+		var edit := LineEdit.new()
+		edit.name = "%sText%d" % [kind, index]
+		edit.text = str(option.get("text", ""))
+		edit.placeholder_text = sample
+		edit.custom_minimum_size = Vector2(0, 48)
+		edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var slot := index
+		_watch(edit, func(text: String) -> void: _set_option_text(kind, slot, text))
+		row.add_child(edit)
+		var mark := CheckBox.new()
+		mark.name = "%sTrue%d" % [kind, index]
+		mark.text = "верный"
+		mark.button_pressed = str(option.get("id", "")) == marked
+		mark.toggled.connect(func(pressed: bool) -> void:
+			if pressed:
+				_mark_option(kind, slot)
+		)
+		row.add_child(mark)
+	var add := UiWidgets.button("Добавить", "Add%s" % ("Method" if method else "Motive"))
+	add.pressed.connect(func() -> void: _add_option(kind))
+	box.add_child(add)
+	return box
+
+
+func _set_option_text(kind: String, index: int, text: String) -> void:
+	var key := "method_options" if kind == "method" else "motive_options"
+	var options: Array = _doc.raw.get(key, [])
+	if index < 0 or index >= options.size() or options[index] is not Dictionary:
+		return
+	_doc._snapshot()
+	(options[index] as Dictionary)["text"] = text
+	_doc.changed.emit()
+	_schedule()
+
+
+func _mark_option(kind: String, index: int) -> void:
+	var key := "method_options" if kind == "method" else "motive_options"
+	var true_key := "true_method_id" if kind == "method" else "true_motive_id"
+	var options: Array = _doc.raw.get(key, [])
+	if index < 0 or index >= options.size() or options[index] is not Dictionary:
+		return
+	_doc.set_field(true_key, str((options[index] as Dictionary).get("id", "")))
+	_build()
+
+
+func _add_option(kind: String) -> void:
+	var key := "method_options" if kind == "method" else "motive_options"
+	var prefix := "method" if kind == "method" else "motive"
+	var options: Array = _doc.raw.get(key, [])
+	var ids := {}
+	for option in options:
+		if option is Dictionary:
+			ids[str((option as Dictionary).get("id", ""))] = true
+	var number := options.size() + 1
+	var option_id := "%s_%d" % [prefix, number]
+	while ids.has(option_id):
+		number += 1
+		option_id = "%s_%d" % [prefix, number]
+	_doc._snapshot()
+	options.append({"id": option_id, "text": ""})
+	_doc.raw[key] = options
+	_doc.changed.emit()
+	_build()
+	_schedule()
 
 
 func _select_agent(index: int) -> void:

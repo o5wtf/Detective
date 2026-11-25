@@ -199,17 +199,46 @@ static func _blank_agent(agent_id: String) -> Dictionary:
 
 
 static func _copy_title(title: String) -> String:
-	var base := title.strip_edges()
-	if base == "":
-		base = "Дело"
-	if base.ends_with("(копия)"):
-		return "%s (копия 2)" % base.trim_suffix(" (копия)").strip_edges()
-	return "%s (копия)" % base
+	var base := _copy_base(title)
+	var used := {}
+	for case_id in list_ids():
+		used[str(read_source(case_id).get("title", ""))] = true
+	if not used.has("%s (копия)" % base):
+		return "%s (копия)" % base
+	var number := 2
+	while used.has("%s (копия %d)" % [base, number]):
+		number += 1
+	return "%s (копия %d)" % [base, number]
+
+
+static func _copy_base(title: String) -> String:
+	var text := title.strip_edges()
+	if text == "":
+		return "Дело"
+	var pattern := RegEx.new()
+	if pattern.compile("^(.*) \\(копия(?: (\\d+))?\\)$") != OK:
+		return text
+	var found := pattern.search(text)
+	if found == null:
+		return text
+	var base := found.get_string(1).strip_edges()
+	return base if base != "" else "Дело"
 
 
 static func _write_documents(case_id: String, bytes: PackedByteArray) -> String:
 	if documents_fail != "":
 		return UiStrings.DOCUMENTS_FAIL % documents_fail
+	# Экспорт Godot 4.7: targetSdk 36, у Forward+ minSdk 29. requestLegacyExternalStorage
+	# и WRITE_EXTERNAL_STORAGE при таком target не дают запись в общие «Документы»
+	# (на Android 11+ разрешение игнорируется, флаг legacy — тоже). Прямой путь
+	# FileAccess туда на устройстве не создаёт файл, который виден в проводнике.
+	# На Android пишем через MediaStore в Documents/Detective: это файл самой игры,
+	# разрешение не нужно. На компьютере и в тестах остаётся обычный путь.
+	if OS.get_name() == "Android" and documents_root == "":
+		var reason := _write_documents_android(case_id, bytes)
+		if reason == "":
+			return ""
+		return UiStrings.DOCUMENTS_FAIL % reason
 	var folder := documents_root
 	if folder == "":
 		var base := OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS)
@@ -219,10 +248,58 @@ static func _write_documents(case_id: String, bytes: PackedByteArray) -> String:
 	var path := "%s/%s.json" % [folder, SaveState._safe(case_id)]
 	if _write_bytes(path, bytes):
 		return ""
-	var stamped := "%s/%s_%s.json" % [folder, SaveState._safe(case_id), Time.get_datetime_string_from_system().replace(":", "").replace(" ", "_")]
+	var stamped := "%s/%s_%s.json" % [folder, SaveState._safe(case_id), _stamp()]
 	if _write_bytes(stamped, bytes):
 		return ""
 	return UiStrings.DOCUMENTS_FAIL % "нет доступа"
+
+
+static func _write_documents_android(case_id: String, bytes: PackedByteArray) -> String:
+	if not Engine.has_singleton("AndroidRuntime") or not ClassDB.class_exists("JavaClassWrapper"):
+		return "нет MediaStore"
+	var runtime: Object = Engine.get_singleton("AndroidRuntime")
+	var activity: Variant = runtime.call("getActivity")
+	if activity == null:
+		return "нет MediaStore"
+	var values_class: Object = JavaClassWrapper.wrap("android.content.ContentValues")
+	var columns: Object = JavaClassWrapper.wrap("android.provider.MediaStore$MediaColumns")
+	var files: Object = JavaClassWrapper.wrap("android.provider.MediaStore$Files")
+	var environment: Object = JavaClassWrapper.wrap("android.os.Environment")
+	if values_class == null or columns == null or files == null or environment == null:
+		return "нет MediaStore"
+	var relative := "%s/Detective/" % str(environment.get("DIRECTORY_DOCUMENTS"))
+	var resolver: Variant = activity.call("getContentResolver")
+	if resolver == null:
+		return "нет MediaStore"
+	var collection: Variant = files.call("getContentUri", "external")
+	var display := "%s.json" % SaveState._safe(case_id)
+	var uri: Variant = _media_insert(resolver, collection, values_class, columns, display, relative)
+	if uri == null:
+		display = "%s_%s.json" % [SaveState._safe(case_id), _stamp()]
+		uri = _media_insert(resolver, collection, values_class, columns, display, relative)
+	if uri == null:
+		return "нет доступа"
+	var stream: Variant = resolver.call("openOutputStream", uri)
+	if stream == null:
+		return "нет доступа"
+	stream.call("write", bytes)
+	stream.call("flush")
+	stream.call("close")
+	return ""
+
+
+static func _media_insert(resolver: Variant, collection: Variant, values_class: Object, columns: Object, display: String, relative: String) -> Variant:
+	var values: Object = values_class.call("new")
+	if values == null:
+		return null
+	values.call("put", str(columns.get("DISPLAY_NAME")), display)
+	values.call("put", str(columns.get("MIME_TYPE")), "application/json")
+	values.call("put", str(columns.get("RELATIVE_PATH")), relative)
+	return resolver.call("insert", collection, values)
+
+
+static func _stamp() -> String:
+	return Time.get_datetime_string_from_system().replace(":", "").replace(" ", "_")
 
 
 static func _write_dict(path: String, raw: Dictionary) -> bool:

@@ -61,6 +61,16 @@ func test_example_is_view_only_until_copy_and_has_no_delete() -> void:
 	assert_false(CaseLibrary.is_example(fresh))
 	var again := CaseLibrary.copy_case(id)
 	assert_false(again == fresh)
+	var first_title := str(CaseLibrary.read_source(fresh).get("title", ""))
+	var second_title := str(CaseLibrary.read_source(again).get("title", ""))
+	assert_true(first_title.ends_with("(копия)"))
+	assert_true(second_title.ends_with("(копия 2)"))
+	assert_true(editor.find_child("MethodOptions", true, false) != null)
+	assert_true(editor.find_child("MotiveOptions", true, false) != null)
+	var method := editor.find_child("methodText0", true, false) as LineEdit
+	assert_eq(method.placeholder_text, "Кухонный нож из клуба")
+	var help_row := (editor.find_child("ProfanityHelp", true, false) as Button).get_parent()
+	assert_true(help_row is HBoxContainer)
 	editor.free()
 	home.free()
 	_restore_roots()
@@ -135,10 +145,106 @@ func test_secrets_do_not_land_in_case_files() -> void:
 	raw["title"] = "MARKER-SECRET-VALUE"
 	var id := str(raw.get("id", ""))
 	assert_true(CaseLibrary.write_draft(id, raw))
-	var text := FileAccess.get_file_as_string(CaseLibrary.draft_path(id))
-	assert_false(text.contains("MARKER-SECRET-VALUE"))
-	assert_false(text.contains("api_key"))
+	assert_true(CaseLibrary.publish(id, raw, true).get("ok", false))
+	raw["briefing"] = "Вторая публикация"
+	raw["secret"] = "MARKER-SECRET-VALUE"
+	assert_true(CaseLibrary.publish(id, raw, true).get("ok", false))
+	var state := GameState.new()
+	state.case_id = id
+	state.dialogues["agent_1"] = {"messages": [{"text": "MARKER-SECRET-VALUE"}]}
+	assert_true(SaveState.write_state(state))
+	for path in [
+		CaseLibrary.draft_path(id),
+		CaseLibrary.published_path(id),
+		CaseLibrary.prev_path(id),
+		"user://editor-test/documents/%s.json" % id,
+		SaveState.slot_path(id),
+	]:
+		assert_true(FileAccess.file_exists(path), path)
+		var text := FileAccess.get_file_as_string(path)
+		assert_false(text.contains("MARKER-SECRET-VALUE"), path)
+	SaveState.discard(id)
 	_restore_settings(previous)
+	_restore_roots()
+
+
+func test_delete_and_restore_wait_for_confirmation() -> void:
+	_use_temp()
+	CaseLibrary.ensure_example()
+	var raw := CaseLibrary.new_case()
+	var id := str(raw.get("id", ""))
+	assert_true(CaseLibrary.write_draft(id, raw))
+	var example := CaseLibrary.example_id()
+	var slot := SaveState.slot_path(example)
+	var had := FileAccess.file_exists(slot)
+	var previous := FileAccess.get_file_as_bytes(slot) if had else PackedByteArray()
+	DirAccess.make_dir_recursive_absolute(SaveState.DIR)
+	var marker := FileAccess.open(slot, FileAccess.WRITE)
+	marker.store_string("{}")
+	marker.close()
+	var root: Window = (Engine.get_main_loop() as SceneTree).root
+	var home := EditorHome.new()
+	root.add_child(home)
+	await (Engine.get_main_loop() as SceneTree).process_frame
+	(home.find_child("Delete_%s" % id, true, false) as Button).pressed.emit()
+	assert_true(FileAccess.file_exists(CaseLibrary.draft_path(id)))
+	var dialog := home.find_child("ConfirmDialog", true, false) as Control
+	assert_true(dialog.visible)
+	assert_true(str((home.find_child("ConfirmText", true, false) as Label).text).contains("Удалить"))
+	(home.find_child("ConfirmYes", true, false) as Button).pressed.emit()
+	assert_false(FileAccess.file_exists(CaseLibrary.draft_path(id)))
+	(home.find_child("RestoreExampleButton", true, false) as Button).pressed.emit()
+	assert_true(FileAccess.file_exists(slot))
+	assert_eq(str((home.find_child("ConfirmText", true, false) as Label).text), UiStrings.SAVE_RESET)
+	(home.find_child("ConfirmYes", true, false) as Button).pressed.emit()
+	assert_false(FileAccess.file_exists(slot))
+	assert_eq(FileAccess.get_file_as_bytes(CaseLibrary.published_path(example)), FileAccess.get_file_as_bytes(CaseLibrary.BUILTIN))
+	if had:
+		var restore := FileAccess.open(slot, FileAccess.WRITE)
+		restore.store_buffer(previous)
+		restore.close()
+	home.free()
+	var picker := CasePicker.new()
+	root.add_child(picker)
+	await (Engine.get_main_loop() as SceneTree).process_frame
+	var start := picker.find_child("Start_%s" % example, true, false) as Button
+	assert_eq(start.text, UiStrings.BEGIN)
+	(picker.find_child("RestoreExampleButton", true, false) as Button).pressed.emit()
+	assert_true((picker.find_child("ConfirmDialog", true, false) as Control).visible)
+	picker.free()
+	_restore_roots()
+
+
+func test_pause_saves_the_draft_and_menu_continue_resets_voice() -> void:
+	_use_temp()
+	CaseLibrary.ensure_example()
+	var id := CaseLibrary.copy_case(CaseLibrary.example_id())
+	var root: Window = (Engine.get_main_loop() as SceneTree).root
+	var editor := CaseEditor.new()
+	root.add_child(editor)
+	editor.open_id(id)
+	var title := editor.find_child("TitleEdit", true, false) as LineEdit
+	title.text = "После паузы"
+	title.focus_exited.emit()
+	editor.notification(Node.NOTIFICATION_APPLICATION_PAUSED)
+	assert_true(FileAccess.get_file_as_string(CaseLibrary.draft_path(id)).contains("После паузы"))
+	var method := editor.find_child("methodText0", true, false) as LineEdit
+	method.text = "Кухонный нож"
+	method.focus_exited.emit()
+	editor.flush_autosave()
+	var saved := CaseLibrary.read_source(id)
+	assert_eq(str((saved.get("method_options", [])[0] as Dictionary).get("text", "")), "Кухонный нож")
+	editor.free()
+	Speaker.queue.enqueue("menu-continue", "текст")
+	assert_false(Speaker.queue.pending.is_empty())
+	var main := (load("res://src/main.tscn") as PackedScene).instantiate()
+	root.add_child(main)
+	await (Engine.get_main_loop() as SceneTree).process_frame
+	Speaker.queue.enqueue("menu-continue", "текст")
+	main._on_continue()
+	assert_true(Speaker.queue.pending.is_empty())
+	assert_eq(Speaker.queue.current_id, "")
+	main.free()
 	_restore_roots()
 
 
@@ -202,10 +308,17 @@ func test_back_shows_retry_when_the_draft_cannot_be_saved() -> void:
 	editor.open_id(id)
 	CaseLibrary.draft_fail = true
 	assert_true(editor.consume_back())
-	var failed := editor.find_child("SaveFailed", true, false)
+	await (Engine.get_main_loop() as SceneTree).process_frame
+	var failed := editor.find_child("SaveFailed", true, false) as Control
+	var retry := editor.find_child("RetrySave", true, false) as Button
+	var leave := editor.find_child("ExitWithoutSaving", true, false) as Button
 	assert_true(failed.visible)
-	assert_true(editor.find_child("RetrySave", true, false) != null)
-	assert_true(editor.find_child("ExitWithoutSaving", true, false) != null)
+	assert_true(retry.visible)
+	assert_true(leave.visible)
+	assert_true(retry.size.y > 0.0)
+	assert_true(leave.size.y > 0.0)
+	assert_true(failed.get_global_rect().encloses(retry.get_global_rect()))
+	assert_true(failed.get_global_rect().encloses(leave.get_global_rect()))
 	assert_eq(str((editor.find_child("SaveFailedText", true, false) as Label).text), UiStrings.SAVE_FAILED)
 	CaseLibrary.draft_fail = false
 	var left := {"gone": false}
